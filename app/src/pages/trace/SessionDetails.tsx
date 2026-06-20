@@ -23,6 +23,7 @@ import { LatencyText } from "@phoenix/components/trace/LatencyText";
 import { SessionTokenCount } from "@phoenix/components/trace/SessionTokenCount";
 import { SESSION_VIEW_PARAM } from "@phoenix/constants/searchParams";
 import { SESSION_DETAILS_PAGE_SIZE } from "@phoenix/pages/trace/constants";
+import { EditSessionAnnotationsButton } from "@phoenix/pages/trace/EditSessionAnnotationsButton";
 
 import { costFormatter } from "../../utils/numberFormatUtils";
 import type {
@@ -47,12 +48,14 @@ function SessionDetailsHeader({
   tokenUsage,
   latencyP50,
   sessionId,
+  projectId,
 }: {
   session: NonNullable<SessionDetailsQuery$data["session"]>;
   tokenUsage?: NonNullable<SessionDetailsQuery$data["session"]>["tokenUsage"];
   costSummary?: NonNullable<SessionDetailsQuery$data["session"]>["costSummary"];
   latencyP50?: number | null;
   sessionId: string;
+  projectId?: string;
 }) {
   return (
     <View
@@ -126,11 +129,18 @@ function SessionDetailsHeader({
             </Flex>
           ) : null}
         </Flex>
-        <Flex direction="row" justifyContent="end">
+        <Flex direction="row" gap="size-200" alignItems="center">
           <SessionAnnotationSummaryGroupStacks
             session={session}
             renderEmptyState={() => null}
           />
+          {projectId != null ? (
+            <EditSessionAnnotationsButton
+              sessionNodeId={sessionId}
+              projectId={projectId}
+              size="S"
+            />
+          ) : null}
         </Flex>
       </Flex>
     </View>
@@ -169,6 +179,9 @@ export function SessionDetails(props: SessionDetailsProps) {
       query SessionDetailsQuery($id: ID!) {
         session: node(id: $id) {
           ... on ProjectSession {
+            project {
+              id
+            }
             numTraces
             tokenUsage {
               total
@@ -295,6 +308,7 @@ export function SessionDetails(props: SessionDetailsProps) {
         tokenUsage={data.session.tokenUsage}
         latencyP50={data.session.latencyP50}
         sessionId={sessionId}
+        projectId={data.session.project?.id}
       />
       <Suspense fallback={<Loading />}>
         {showTracesView

@@ -1,3 +1,4 @@
+import { OpenTelemetry } from "@ai-sdk/otel";
 import { OpenInferenceSimpleSpanProcessor } from "@arizeai/openinference-vercel";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-node";
@@ -10,6 +11,7 @@ import {
   detachGlobalTracerProvider,
   register,
   registerAiSdkTelemetry,
+  resetAiSdkTelemetryRegistrationForTesting,
 } from "../src";
 
 type GlobalWithAiSdkTelemetry = typeof globalThis & {
@@ -68,6 +70,7 @@ function createCountingSpanProcessor() {
 afterEach(() => {
   detachGlobalTracerProvider();
   clearGlobalIntegrations();
+  resetAiSdkTelemetryRegistrationForTesting();
 });
 
 describe("registerAiSdkTelemetry", () => {
@@ -82,35 +85,67 @@ describe("registerAiSdkTelemetry", () => {
     expect(getGlobalIntegrations()).toHaveLength(1);
   });
 
-  test("does not override an application-registered integration", () => {
-    const sentinel = { onStart: () => {} };
+  test("skips registration when an OpenTelemetry integration already exists", () => {
+    const applicationIntegration = new OpenTelemetry();
     (globalThis as GlobalWithAiSdkTelemetry).AI_SDK_TELEMETRY_INTEGRATIONS = [
-      sentinel,
+      applicationIntegration,
     ];
 
     expect(registerAiSdkTelemetry()).toBe(true);
-    expect(getGlobalIntegrations()).toEqual([sentinel]);
+    expect(getGlobalIntegrations()).toEqual([applicationIntegration]);
+  });
+
+  test("registers alongside a non-OpenTelemetry integration", () => {
+    // A logging/analytics integration does not configure OpenTelemetry span
+    // export, so Phoenix must still register its own integration.
+    const loggingIntegration = { onStart: () => {} };
+    (globalThis as GlobalWithAiSdkTelemetry).AI_SDK_TELEMETRY_INTEGRATIONS = [
+      loggingIntegration,
+    ];
+
+    expect(registerAiSdkTelemetry()).toBe(true);
+    const integrations = getGlobalIntegrations();
+    expect(integrations).toHaveLength(2);
+    expect(integrations?.[0]).toBe(loggingIntegration);
+    expect(integrations?.[1]).toBeInstanceOf(OpenTelemetry);
   });
 
   test("register() registers AI SDK telemetry by default and can opt out", async () => {
-    const optedOutProvider = register({
+    // aiSdkTelemetry defaults to the value of `global` — a non-global
+    // register() call must not mutate process-global AI SDK telemetry state.
+    const nonGlobalProvider = register({
       url: "http://localhost:6006/v1/traces",
       apiKey: "test",
       spanProcessors: [createCountingSpanProcessor().processor],
       global: false,
-      aiSdkTelemetry: false,
     });
     expect(getGlobalIntegrations()).toBeUndefined();
 
+    // A non-global call can opt in explicitly (e.g. when the caller attaches
+    // the provider globally themselves).
+    const optedInProvider = register({
+      url: "http://localhost:6006/v1/traces",
+      apiKey: "test",
+      spanProcessors: [createCountingSpanProcessor().processor],
+      global: false,
+      aiSdkTelemetry: true,
+    });
+    expect(getGlobalIntegrations()).toHaveLength(1);
+
+    await nonGlobalProvider.shutdown();
+    await optedInProvider.shutdown();
+  });
+
+  test("register({global: true}) can opt out of AI SDK telemetry", async () => {
     const provider = register({
       url: "http://localhost:6006/v1/traces",
       apiKey: "test",
       spanProcessors: [createCountingSpanProcessor().processor],
-      global: false,
+      global: true,
+      aiSdkTelemetry: false,
     });
-    expect(getGlobalIntegrations()).toHaveLength(1);
+    expect(getGlobalIntegrations()).toBeUndefined();
 
-    await optedOutProvider.shutdown();
     await provider.shutdown();
   });
 });

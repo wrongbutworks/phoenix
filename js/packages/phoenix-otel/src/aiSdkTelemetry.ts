@@ -13,6 +13,10 @@ const AI_SDK_TRACER_NAME = "ai";
  * This keeps AI SDK telemetry working across `attachGlobalTracerProvider()` /
  * `detachGlobalTracerProvider()` cycles (e.g. phoenix-client experiments).
  *
+ * Note: `@arizeai/phoenix-evals` keeps an equivalent lazy tracer in
+ * `src/telemetry/index.ts` (it cannot depend on this package); keep the two
+ * implementations in sync.
+ *
  * Cast to `Tracer` is necessary because `startActiveSpan` has multiple
  * overload signatures that cannot be satisfied by a single implementation.
  */
@@ -40,9 +44,42 @@ function getRegisteredAiSdkTelemetryIntegrations(): unknown[] | undefined {
   return (globalThis as GlobalWithAiSdkTelemetry).AI_SDK_TELEMETRY_INTEGRATIONS;
 }
 
+/**
+ * Whether an already-registered integration is an OpenTelemetry integration.
+ * Uses an instanceof check plus a constructor-name fallback so integrations
+ * constructed from a different copy of `@ai-sdk/otel` are still recognized.
+ */
+function isOpenTelemetryIntegration(integration: unknown): boolean {
+  if (integration instanceof OpenTelemetry) {
+    return true;
+  }
+  const constructorName = (integration as { constructor?: { name?: string } })
+    ?.constructor?.name;
+  return (
+    constructorName === "OpenTelemetry" ||
+    constructorName === "LegacyOpenTelemetry"
+  );
+}
+
 type AiModule = {
   registerTelemetry?: (...integrations: object[]) => void;
 };
+
+/**
+ * The integration this module registered, if any. Serves as a Phoenix-side
+ * idempotency guard that does not depend on reading the AI SDK's internal
+ * integration storage.
+ */
+let phoenixIntegration: OpenTelemetry | null = null;
+
+/**
+ * Resets this module's registration state. Intended for tests only.
+ *
+ * @internal
+ */
+export function resetAiSdkTelemetryRegistrationForTesting(): void {
+  phoenixIntegration = null;
+}
 
 /**
  * Registers an OpenTelemetry telemetry integration for the Vercel AI SDK (v7+)
@@ -57,22 +94,33 @@ type AiModule = {
  *
  * The registration is skipped when:
  * - the `ai` package is not installed (it is an optional peer dependency), or
- * - a telemetry integration is already registered (to avoid duplicate spans).
+ * - this helper has already registered an integration, or
+ * - an `OpenTelemetry` integration is already registered by the application
+ *   (to avoid duplicate spans). Non-OpenTelemetry integrations (e.g. logging
+ *   integrations) do not suppress registration — the AI SDK supports multiple
+ *   integrations, and OpenTelemetry span export still needs to be configured.
  *
- * @returns `true` if an integration is registered (by this call or before),
- *   `false` when the `ai` package (v7+) is not available.
+ * @returns `true` if an OpenTelemetry integration is registered (by this call
+ *   or before), `false` when the `ai` package (v7+) is not available.
  */
 export function registerAiSdkTelemetry(): boolean {
+  if (phoenixIntegration) {
+    // Already registered by this module; never double-register even if the
+    // AI SDK's internal integration storage cannot be read.
+    return true;
+  }
+
   const existingIntegrations = getRegisteredAiSdkTelemetryIntegrations();
-  if (existingIntegrations && existingIntegrations.length > 0) {
-    // Telemetry is already configured; don't add a duplicate integration.
+  if (existingIntegrations?.some(isOpenTelemetryIntegration)) {
+    // The application already configured OpenTelemetry-based AI SDK
+    // telemetry; don't add a duplicate integration.
     return true;
   }
 
   let ai: AiModule;
   try {
-    // The `ai` package is ESM-only; require() of ESM is supported on the
-    // Node.js versions (>=22) that AI SDK v7 itself requires.
+    // The `ai` package is ESM-only; require() of ESM is supported unflagged
+    // on Node.js >=22.12 (hence this package's engines field).
     const requireModule = createRequire(import.meta.url);
     ai = requireModule("ai") as AiModule;
   } catch {
@@ -84,21 +132,21 @@ export function registerAiSdkTelemetry(): boolean {
     return false;
   }
 
-  ai.registerTelemetry(
-    new OpenTelemetry({
-      tracer: createLazyTracer(AI_SDK_TRACER_NAME),
-      // Supplemental AI SDK attributes recommended for fuller OpenInference
-      // coverage — the OpenInference span processors use these to fill data
-      // gaps that GenAI semantic conventions do not cover.
-      usage: true,
-      providerMetadata: true,
-      embedding: true,
-      reranking: true,
-      runtimeContext: true,
-      headers: true,
-      toolChoice: true,
-      schema: true,
-    })
-  );
+  const integration = new OpenTelemetry({
+    tracer: createLazyTracer(AI_SDK_TRACER_NAME),
+    // Supplemental AI SDK attributes recommended for fuller OpenInference
+    // coverage — the OpenInference span processors use these to fill data
+    // gaps that GenAI semantic conventions do not cover.
+    usage: true,
+    providerMetadata: true,
+    embedding: true,
+    reranking: true,
+    runtimeContext: true,
+    headers: true,
+    toolChoice: true,
+    schema: true,
+  });
+  ai.registerTelemetry(integration);
+  phoenixIntegration = integration;
   return true;
 }

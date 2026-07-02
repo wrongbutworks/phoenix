@@ -120,7 +120,7 @@ const provider = register({
 | `instrumentations` | OpenTelemetry instrumentations to register with the provider. |
 | `spanProcessors` | Custom span processors. When provided, these replace the default Phoenix exporter setup. |
 | `global` | Whether to attach the provider to the global OpenTelemetry APIs automatically. |
-| `aiSdkTelemetry` | Whether to auto-register a Vercel AI SDK (v7+) telemetry integration when the `ai` package is installed. Defaults to `true`. |
+| `aiSdkTelemetry` | Whether to auto-register a Vercel AI SDK (v7+) telemetry integration when the `ai` package is installed. Defaults to the value of `global`, since AI SDK spans route through the global tracer provider. |
 | `diagLogLevel` | OpenTelemetry diagnostic logging level. |
 
 ### Environment Variables
@@ -145,7 +145,8 @@ register({ projectName: "my-ai-app" });
 // const result = await generateText({ model, prompt });
 ```
 
-- registration is skipped when your application already registered its own AI SDK telemetry integration
+- registration is skipped when your application already registered its own `OpenTelemetry` AI SDK integration
+- the default follows the `global` option: non-global `register()` calls don't touch AI SDK telemetry unless you pass `aiSdkTelemetry: true`
 - pass `aiSdkTelemetry: false` to opt out
 - AI SDK v6 and older emit a different span shape; use `@arizeai/phoenix-otel` 1.x for AI SDK v6
 

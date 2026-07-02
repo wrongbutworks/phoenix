@@ -40,8 +40,10 @@ A lightweight wrapper around OpenTelemetry for Node.js applications that simplif
 npm install @arizeai/phoenix-otel
 ```
 
-Requires Node.js 22 or newer. The package is published as ESM; on Node.js 22+
-it can also be loaded from CommonJS via `require()`.
+Requires Node.js 22.12 or newer. The package is published as ESM; on Node.js
+22.12+ it can also be loaded from CommonJS via `require()`. Note that test
+runners with their own CommonJS module registries (e.g. jest without ESM mode)
+cannot `require()` ESM-only packages.
 
 ## Quick Start
 
@@ -109,7 +111,7 @@ The `register` function accepts the following parameters:
 | `batch`            | `boolean`                | `true`                    | Use batch span processing (recommended for production) |
 | `instrumentations` | `Instrumentation[]`      | `undefined`               | Array of OpenTelemetry instrumentations to register    |
 | `global`           | `boolean`                | `true`                    | Register the tracer provider globally                  |
-| `aiSdkTelemetry`   | `boolean`                | `true`                    | Register Vercel AI SDK (v7+) telemetry when available  |
+| `aiSdkTelemetry`   | `boolean`                | value of `global`         | Register Vercel AI SDK (v7+) telemetry when available  |
 | `diagLogLevel`     | `DiagLogLevel`           | `undefined`               | Diagnostic logging level for debugging                 |
 
 ## Usage Examples
@@ -144,9 +146,13 @@ const result = await generateText({
 });
 ```
 
-If your application registers its own AI SDK telemetry integration, Phoenix
-skips the automatic registration. To opt out entirely, pass
-`aiSdkTelemetry: false` to `register()`.
+If your application already registers its own `OpenTelemetry` AI SDK
+integration, Phoenix skips the automatic registration. Because AI SDK spans
+route through the global tracer provider, the automatic registration only
+happens by default when `register()` mounts the provider globally
+(`global: true`, the default); pass `aiSdkTelemetry: true` alongside
+`global: false` if you attach the provider globally yourself, or
+`aiSdkTelemetry: false` to opt out entirely.
 
 > **Note**: AI SDK v6 and older emit a different span shape that is not
 > supported by the bundled span processors. Use `@arizeai/phoenix-otel` 1.x

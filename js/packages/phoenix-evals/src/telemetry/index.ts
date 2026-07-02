@@ -6,6 +6,10 @@ const DEFAULT_TRACER_NAME = "phoenix-evals";
  * Returns a lazy tracer that resolves from `trace.getTracer()` on every call,
  * so evaluator spans follow whichever provider is currently mounted as global.
  *
+ * Note: `@arizeai/phoenix-otel` keeps an equivalent lazy tracer in
+ * `src/aiSdkTelemetry.ts` (this package cannot depend on it); keep the two
+ * implementations in sync.
+ *
  * Cast to `Tracer` is necessary because `startActiveSpan` has multiple
  * overload signatures that cannot be satisfied by a single implementation.
  */

@@ -368,6 +368,9 @@ export async function initializeSuite(suite: SuiteState): Promise<void> {
         : undefined,
       batch: false,
       global: false,
+      // The provider is attached globally right below, so AI SDK spans
+      // (routed through the global provider) should be enabled.
+      aiSdkTelemetry: true,
     });
     suite.tracerProvider = provider;
     suite.globalRegistration = attachGlobalTracerProvider(provider);

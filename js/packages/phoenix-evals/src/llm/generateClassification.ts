@@ -1,4 +1,5 @@
 import { OpenTelemetry } from "@ai-sdk/otel";
+import type { Tracer } from "@opentelemetry/api";
 import { generateObject } from "ai";
 import { z } from "zod";
 
@@ -23,6 +24,28 @@ export type ClassifyArgs = WithLLM &
     schemaDescription?: string;
   };
 /**
+ * Telemetry integrations memoized per tracer — the integration config is
+ * static, so avoid allocating a new integration on every classification call.
+ */
+const telemetryIntegrations = new WeakMap<Tracer, OpenTelemetry>();
+
+function getTelemetryIntegration(integrationTracer: Tracer): OpenTelemetry {
+  let integration = telemetryIntegrations.get(integrationTracer);
+  if (!integration) {
+    integration = new OpenTelemetry({
+      tracer: integrationTracer,
+      // Supplemental AI SDK attributes recommended for fuller OpenInference
+      // coverage of generateObject calls.
+      usage: true,
+      providerMetadata: true,
+      schema: true,
+    });
+    telemetryIntegrations.set(integrationTracer, integration);
+  }
+  return integration;
+}
+
+/**
  * A function that leverages an llm to perform a classification
  */
 export async function generateClassification(
@@ -37,15 +60,7 @@ export async function generateClassification(
     // A per-call telemetry integration takes precedence over any globally
     // registered integrations, so evaluator spans always flow through the
     // provided (or lazy global) tracer.
-    integrations: [
-      new OpenTelemetry({
-        tracer: telemetry?.tracer ?? tracer,
-        usage: true,
-        providerMetadata: true,
-        toolChoice: true,
-        schema: true,
-      }),
-    ],
+    integrations: [getTelemetryIntegration(telemetry?.tracer ?? tracer)],
   };
 
   const result = await generateObject({

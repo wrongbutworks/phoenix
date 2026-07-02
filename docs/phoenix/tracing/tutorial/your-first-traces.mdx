@@ -366,7 +366,9 @@ To see all operations for a single request as one trace, wrap them in a parent s
 <Tabs>
   <Tab title="TypeScript" icon="js">
     ```typescript
-    import { trace, SpanStatusCode } from "@opentelemetry/api";
+    // trace and SpanStatusCode are re-exported by @arizeai/phoenix-otel, so
+    // no direct dependency on @opentelemetry/api is needed
+    import { trace, SpanStatusCode } from "@arizeai/phoenix-otel";
 
     const tracer = trace.getTracer("support-agent");
 

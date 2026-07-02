@@ -227,6 +227,9 @@ function setupEvaluationTracer({
     batch: useBatchSpanProcessor,
     diagLogLevel,
     global: false,
+    // AI SDK spans route through the global provider, so only enable the
+    // integration when this provider is about to be attached globally.
+    aiSdkTelemetry: setGlobalTracerProvider,
   });
   const globalRegistration = setGlobalTracerProvider
     ? attachGlobalTracerProvider(provider)

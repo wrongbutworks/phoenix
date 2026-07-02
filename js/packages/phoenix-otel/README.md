@@ -40,6 +40,9 @@ A lightweight wrapper around OpenTelemetry for Node.js applications that simplif
 npm install @arizeai/phoenix-otel
 ```
 
+Requires Node.js 22 or newer. The package is published as ESM; on Node.js 22+
+it can also be loaded from CommonJS via `require()`.
+
 ## Quick Start
 
 ### Basic Usage
@@ -106,9 +109,48 @@ The `register` function accepts the following parameters:
 | `batch`            | `boolean`                | `true`                    | Use batch span processing (recommended for production) |
 | `instrumentations` | `Instrumentation[]`      | `undefined`               | Array of OpenTelemetry instrumentations to register    |
 | `global`           | `boolean`                | `true`                    | Register the tracer provider globally                  |
+| `aiSdkTelemetry`   | `boolean`                | `true`                    | Register Vercel AI SDK (v7+) telemetry when available  |
 | `diagLogLevel`     | `DiagLogLevel`           | `undefined`               | Diagnostic logging level for debugging                 |
 
 ## Usage Examples
+
+### With the Vercel AI SDK (v7+)
+
+When the `ai` package (v7 or later) is installed, `register()` automatically
+registers an AI SDK telemetry integration (via `registerTelemetry` from `ai`
+and `OpenTelemetry` from `@ai-sdk/otel`), so AI SDK calls emit spans without
+any per-call configuration. Spans are translated to OpenInference by the
+`@arizeai/openinference-vercel` span processors that `register()` sets up by
+default.
+
+```typescript
+// instrumentation.ts
+import { register } from "@arizeai/phoenix-otel";
+
+register({
+  projectName: "my-ai-app",
+});
+```
+
+```typescript
+// main.ts
+import "./instrumentation.ts";
+import { openai } from "@ai-sdk/openai";
+import { generateText } from "ai";
+
+const result = await generateText({
+  model: openai("gpt-4o-mini"),
+  prompt: "Write a short story about a cat.",
+});
+```
+
+If your application registers its own AI SDK telemetry integration, Phoenix
+skips the automatic registration. To opt out entirely, pass
+`aiSdkTelemetry: false` to `register()`.
+
+> **Note**: AI SDK v6 and older emit a different span shape that is not
+> supported by the bundled span processors. Use `@arizeai/phoenix-otel` 1.x
+> (with `@arizeai/openinference-vercel` 2.x) for AI SDK v6.
 
 ### With Auto-Instrumentation
 

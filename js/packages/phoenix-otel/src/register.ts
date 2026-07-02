@@ -27,6 +27,7 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 
+import { registerAiSdkTelemetry } from "./aiSdkTelemetry";
 import { getEnvApiKey, getEnvCollectorURL } from "./config";
 
 /**
@@ -154,6 +155,23 @@ export type RegisterParams = {
    * @default true
    */
   global?: boolean;
+
+  /**
+   * Whether to register a telemetry integration for the Vercel AI SDK (v7+).
+   *
+   * Since AI SDK v7, calls like `generateText` and `streamText` only emit
+   * OpenTelemetry spans once a telemetry integration is registered via
+   * `registerTelemetry()`. When this option is `true` (default) and the `ai`
+   * package is installed, an `OpenTelemetry` integration (from
+   * `@ai-sdk/otel`) is registered automatically so AI SDK spans flow through
+   * the global tracer provider. Registration is skipped if the application
+   * has already registered a telemetry integration.
+   *
+   * Set to `false` if you want to configure AI SDK telemetry manually.
+   *
+   * @default true
+   */
+  aiSdkTelemetry?: boolean;
 
   /**
    * The diagnostic log level for the built-in DiagConsoleLogger.
@@ -465,10 +483,15 @@ export function register(params: RegisterParams): NodeTracerProvider {
     global = true,
     diagLogLevel,
     spanProcessors,
+    aiSdkTelemetry = true,
   } = params;
 
   if (diagLogLevel) {
     diag.setLogger(new DiagConsoleLogger(), diagLogLevel);
+  }
+
+  if (aiSdkTelemetry) {
+    registerAiSdkTelemetry();
   }
   const provider = new NodeTracerProvider({
     resource: resourceFromAttributes({

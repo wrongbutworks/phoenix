@@ -1,7 +1,9 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "./tsconfig.esm.json",
   "compilerOptions": {
-    "outDir": "dist",
+    "noEmit": true,
+    "composite": false,
+    "incremental": false,
     "rootDir": ".",
     "types": ["node"],
     "noUncheckedIndexedAccess": true

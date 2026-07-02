@@ -1,3 +1,4 @@
+import { OpenTelemetry } from "@ai-sdk/otel";
 import { generateObject } from "ai";
 import { z } from "zod";
 
@@ -30,10 +31,21 @@ export async function generateClassification(
   const { labels, model, schemaName, schemaDescription, telemetry, ...prompt } =
     args;
 
-  const experimental_telemetry = {
+  const telemetryOptions = {
     isEnabled: telemetry?.isEnabled ?? true,
     functionId: "generateClassification",
-    tracer: telemetry?.tracer ?? tracer,
+    // A per-call telemetry integration takes precedence over any globally
+    // registered integrations, so evaluator spans always flow through the
+    // provided (or lazy global) tracer.
+    integrations: [
+      new OpenTelemetry({
+        tracer: telemetry?.tracer ?? tracer,
+        usage: true,
+        providerMetadata: true,
+        toolChoice: true,
+        schema: true,
+      }),
+    ],
   };
 
   const result = await generateObject({
@@ -44,7 +56,10 @@ export async function generateClassification(
       explanation: z.string(), // We place the explanation in hopes it uses reasoning to explain the label.
       label: z.enum(labels),
     }),
-    experimental_telemetry,
+    telemetry: telemetryOptions,
+    // AI SDK 7 rejects system messages inside `messages` by default; keep
+    // accepting them since prompt templates may include system messages.
+    allowSystemInMessages: true,
     ...prompt,
   });
   return {

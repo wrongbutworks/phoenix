@@ -120,6 +120,7 @@ const provider = register({
 | `instrumentations` | OpenTelemetry instrumentations to register with the provider. |
 | `spanProcessors` | Custom span processors. When provided, these replace the default Phoenix exporter setup. |
 | `global` | Whether to attach the provider to the global OpenTelemetry APIs automatically. |
+| `aiSdkTelemetry` | Whether to auto-register a Vercel AI SDK (v7+) telemetry integration when the `ai` package is installed. Defaults to `true`. |
 | `diagLogLevel` | OpenTelemetry diagnostic logging level. |
 
 ### Environment Variables
@@ -130,6 +131,25 @@ const provider = register({
 | `PHOENIX_API_KEY` | API key used when you do not pass `apiKey` explicitly. |
 
 ## Instrumentation
+
+### Vercel AI SDK (v7+)
+
+When the `ai` package (v7 or later) is installed, `register()` automatically registers an AI SDK telemetry integration, so calls like `generateText` and `streamText` emit spans without per-call configuration. The bundled `@arizeai/openinference-vercel` span processors translate AI SDK spans to OpenInference before export.
+
+```ts
+import { register } from "@arizeai/phoenix-otel";
+
+register({ projectName: "my-ai-app" });
+
+// Elsewhere in your app — traced automatically:
+// const result = await generateText({ model, prompt });
+```
+
+- registration is skipped when your application already registered its own AI SDK telemetry integration
+- pass `aiSdkTelemetry: false` to opt out
+- AI SDK v6 and older emit a different span shape; use `@arizeai/phoenix-otel` 1.x for AI SDK v6
+
+### OpenTelemetry Instrumentations
 
 Pass OpenTelemetry instrumentations to `register()` to capture framework and library activity automatically.
 

@@ -32,17 +32,19 @@
     "src",
     "package.json"
   ],
-  "main": "dist/src/index.js",
+  "type": "module",
+  "main": "dist/esm/index.js",
   "module": "dist/esm/index.js",
-  "types": "dist/src/index.d.ts",
+  "types": "dist/esm/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/esm/index.d.ts",
       "import": "./dist/esm/index.js",
-      "require": "./dist/src/index.js"
+      "default": "./dist/esm/index.js"
     }
   },
   "scripts": {
-    "build": "tsc --build tsconfig.json tsconfig.esm.json && tsc-alias -p tsconfig.esm.json",
+    "build": "tsc --build tsconfig.esm.json && tsc-alias -p tsconfig.esm.json",
     "clean": "rimraf dist",
     "postbuild": "echo '{\"type\": \"module\"}' > ./dist/esm/package.json",
     "postpublish": "node ../../scripts/sync-package-docs.mjs clean phoenix-otel",
@@ -53,9 +55,10 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p examples/tsconfig.examples.json"
   },
   "dependencies": {
+    "@ai-sdk/otel": "^1.0.0",
     "@arizeai/openinference-core": "^2.4.0",
     "@arizeai/openinference-semantic-conventions": "^2.5.0",
-    "@arizeai/openinference-vercel": "^2.8.1",
+    "@arizeai/openinference-vercel": "^3.1.0",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/context-async-hooks": "^2.8.0",
     "@opentelemetry/core": "^2.8.0",
@@ -67,6 +70,18 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.4",
+    "ai": "^7.0.0",
     "vitest": "^4.1.9"
+  },
+  "peerDependencies": {
+    "ai": "^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ai": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

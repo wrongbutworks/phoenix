@@ -2043,6 +2043,13 @@ type FailureDetail {
   errorType: String!
 }
 
+type FilterVocabularyTerm {
+  name: String!
+  type: String!
+  description: String!
+  category: String!
+}
+
 type FreeformAnnotationConfig implements Node & AnnotationConfigBase {
   """The Globally Unique ID of this object"""
   id: ID!
@@ -2724,6 +2731,7 @@ type Project implements Node {
   hasTraces: Boolean!
   recordCount(timeRange: TimeRange, filterCondition: String, sessionFilterCondition: String): Int!
   traceCount(timeRange: TimeRange, filterCondition: String, sessionFilterCondition: String): Int!
+  sessionCount(timeRange: TimeRange, sessionFilterCondition: String): Int!
   tokenCountTotal(timeRange: TimeRange, filterCondition: String): Float!
   tokenCountPrompt(timeRange: TimeRange, filterCondition: String): Float!
   tokenCountCompletion(timeRange: TimeRange, filterCondition: String): Float!
@@ -2732,7 +2740,7 @@ type Project implements Node {
   spanLatencyMsQuantile(probability: Float!, timeRange: TimeRange, filterCondition: String, sessionFilterCondition: String): Float
   trace(traceId: ID!): Trace
   spans(timeRange: TimeRange, first: Int!, last: Int, after: String, before: String, sort: SpanSort, rootSpansOnly: Boolean, filterCondition: String, orphanSpanAsRootSpan: Boolean = true): SpanConnection!
-  sessions(timeRange: TimeRange, first: Int = 30, after: String, sort: ProjectSessionSort, filterIoSubstring: String, sessionId: String): ProjectSessionConnection!
+  sessions(timeRange: TimeRange, first: Int = 30, after: String, sort: ProjectSessionSort, filterIoSubstring: String, sessionFilterCondition: String, sessionId: String): ProjectSessionConnection!
 
   """
   Names of all available annotations for traces. (The list contains no duplicates.)
@@ -2771,6 +2779,8 @@ type Project implements Node {
   documentEvaluationSummary(evaluationName: String!, timeRange: TimeRange, filterCondition: String): DocumentEvaluationSummary
   streamingLastUpdatedAt: DateTime
   validateSpanFilterCondition(condition: String!): ValidationResult!
+  validateSessionFilterCondition(condition: String!): ValidationResult!
+  sessionFilterVocabulary: [FilterVocabularyTerm!]!
   annotationConfigs(first: Int = 50, last: Int = null, after: String = null, before: String = null): AnnotationConfigConnection!
   traceRetentionPolicy: ProjectTraceRetentionPolicy!
   createdAt: DateTime!

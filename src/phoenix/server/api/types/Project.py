@@ -33,6 +33,10 @@ from phoenix.server.api.types.AnnotationNameCount import AnnotationNameCount
 from phoenix.server.api.types.AnnotationSummary import AnnotationSummary
 from phoenix.server.api.types.CostBreakdown import CostBreakdown
 from phoenix.server.api.types.DocumentEvaluationSummary import DocumentEvaluationSummary
+from phoenix.server.api.types.FilterVocabularyTerm import (
+    FilterVocabularyTerm,
+    session_filter_vocabulary_terms,
+)
 from phoenix.server.api.types.GenerativeModel import GenerativeModel
 from phoenix.server.api.types.node import from_global_id_with_expected_type
 from phoenix.server.api.types.pagination import (
@@ -51,9 +55,13 @@ from phoenix.server.api.types.SpanCostSummary import SpanCostSummary
 from phoenix.server.api.types.TimeSeries import TimeSeries, TimeSeriesDataPoint
 from phoenix.server.api.types.Trace import Trace
 from phoenix.server.api.types.ValidationResult import ValidationResult
-from phoenix.server.session_filters import get_filtered_session_rowids_subquery
+from phoenix.server.session_filters import (
+    get_filtered_session_rowids_subquery,
+    get_io_substring_session_rowids_subquery,
+)
 from phoenix.server.types import DbSessionFactory
 from phoenix.trace.dsl import SpanFilter
+from phoenix.trace.dsl.session_filter import SessionFilter
 
 DEFAULT_PAGE_SIZE = 30
 _TOKEN_COUNT_DETAIL_EPSILON = 1e-9
@@ -281,6 +289,35 @@ class Project(Node):
                 session_filter_condition or None,
             ),
         )
+
+    @strawberry.field
+    async def session_count(
+        self,
+        info: Info[Context, None],
+        time_range: Optional[TimeRange] = UNSET,
+        session_filter_condition: Optional[str] = UNSET,
+    ) -> int:
+        start_time = time_range.start if time_range else None
+        end_time = time_range.end if time_range else None
+        stmt = (
+            select(func.count())
+            .select_from(models.ProjectSession)
+            .where(models.ProjectSession.project_id == self.id)
+        )
+        if start_time is not None:
+            stmt = stmt.where(start_time <= models.ProjectSession.start_time)
+        if end_time is not None:
+            stmt = stmt.where(models.ProjectSession.start_time < end_time)
+        if session_filter_condition:
+            filtered_session_rowids = get_filtered_session_rowids_subquery(
+                session_filter_condition=session_filter_condition,
+                project_rowids=[self.id],
+                start_time=start_time,
+                end_time=end_time,
+            )
+            stmt = stmt.where(models.ProjectSession.id.in_(filtered_session_rowids))
+        async with info.context.db.read() as session:
+            return await session.scalar(stmt) or 0
 
     @strawberry.field
     async def token_count_total(
@@ -535,8 +572,14 @@ class Project(Node):
         after: Optional[CursorString] = UNSET,
         sort: Optional[ProjectSessionSort] = UNSET,
         filter_io_substring: Optional[str] = UNSET,
+        session_filter_condition: Optional[str] = UNSET,
         session_id: Optional[str] = UNSET,
     ) -> Connection[ProjectSession]:
+        if filter_io_substring and session_filter_condition:
+            raise BadRequest(
+                "Both a session filter condition and an IO substring filter "
+                "cannot be applied at the same time"
+            )
         table = models.ProjectSession
         if session_id:
             async with info.context.db.read() as session:
@@ -551,7 +594,7 @@ class Project(Node):
                     data=[ProjectSession(id=ans.id, db_record=ans)],
                     args=ConnectionArgs(),
                 )
-            elif not filter_io_substring:
+            elif not filter_io_substring and not session_filter_condition:
                 return connection_from_list(
                     data=[],
                     args=ConnectionArgs(),
@@ -563,8 +606,16 @@ class Project(Node):
             if time_range.end:
                 stmt = stmt.where(table.start_time < time_range.end)
         if filter_io_substring:
+            filtered_session_rowids = get_io_substring_session_rowids_subquery(
+                io_substring=filter_io_substring,
+                project_rowids=[self.id],
+                start_time=time_range.start if time_range else None,
+                end_time=time_range.end if time_range else None,
+            )
+            stmt = stmt.where(table.id.in_(filtered_session_rowids))
+        if session_filter_condition:
             filtered_session_rowids = get_filtered_session_rowids_subquery(
-                session_filter_condition=filter_io_substring,
+                session_filter_condition=session_filter_condition,
                 project_rowids=[self.id],
                 start_time=time_range.start if time_range else None,
                 end_time=time_range.end if time_range else None,
@@ -863,6 +914,47 @@ class Project(Node):
                 is_valid=False,
                 error_message=str(e),
             )
+
+    @strawberry.field
+    async def validate_session_filter_condition(
+        self,
+        info: Info[Context, None],
+        condition: str,
+    ) -> ValidationResult:
+        """Validate a session filter condition by compiling it for both SQLite and PostgreSQL.
+
+        Mirrors ``validate_span_filter_condition`` for the session grain: the condition is compiled
+        to SQL for both dialects without executing, so any syntax or binding error surfaces as an
+        invalid result. Per-keystroke annotation-name validation is intentionally skipped for cost.
+        """
+        try:
+            session_filter = SessionFilter(condition=condition)
+            stmt = session_filter(select(models.ProjectSession))
+            str(stmt.compile(dialect=sqlite.dialect()))
+            str(stmt.compile(dialect=postgresql.dialect()))  # type: ignore[no-untyped-call]
+            return ValidationResult(is_valid=True, error_message=None)
+        except Exception as e:
+            return ValidationResult(is_valid=False, error_message=str(e))
+
+    @strawberry.field
+    async def session_filter_vocabulary(
+        self,
+        info: Info[Context, None],
+    ) -> list[FilterVocabularyTerm]:
+        """The bindable session-filter terms for this project (autocomplete / agent discovery).
+
+        Static terms derive from the ``SessionFilter`` compiler's own name maps, so they cannot
+        drift from what compiles; per-project session-annotation names are folded in as typed
+        ``annotations[...]`` terms.
+        """
+        stmt = (
+            select(distinct(models.ProjectSessionAnnotation.name))
+            .join(models.ProjectSession)
+            .where(models.ProjectSession.project_id == self.id)
+        )
+        async with info.context.db.read() as session:
+            annotation_names = list(await session.scalars(stmt))
+        return session_filter_vocabulary_terms(annotation_names)
 
     @strawberry.field
     async def annotation_configs(

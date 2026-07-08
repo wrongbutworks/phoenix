@@ -12,6 +12,8 @@ import {
   SummaryValueLabelPreview,
   SummaryValuePreview,
 } from "@phoenix/pages/project/AnnotationSummary";
+import { AnnotationTooltipFilterActions } from "@phoenix/pages/project/AnnotationTooltipFilterActions";
+import { useSessionFilters } from "@phoenix/pages/project/SessionFiltersContext";
 import type { AnnotationConfigCategorical } from "@phoenix/pages/settings/types";
 
 const useSessionAnnotationSummaryGroup = (
@@ -129,6 +131,24 @@ const annotationLabelCSS = css`
   display: flex;
 `;
 
+function SessionAnnotationTooltipFilterActions({
+  annotation,
+}: {
+  annotation: {
+    name: string;
+    label?: string | null;
+    score?: number | null;
+  };
+}) {
+  const { appendFilterCondition } = useSessionFilters();
+  return (
+    <AnnotationTooltipFilterActions
+      annotation={annotation}
+      onAppendFilterCondition={appendFilterCondition}
+    />
+  );
+}
+
 export const SessionAnnotationSummaryGroupTokens = ({
   session,
   showFilterActions = false,
@@ -159,6 +179,9 @@ export const SessionAnnotationSummaryGroupTokens = ({
             width="500px"
             meanScore={meanScore}
             showFilterActions={showFilterActions}
+            renderFilterActions={(annotation) => (
+              <SessionAnnotationTooltipFilterActions annotation={annotation} />
+            )}
           >
             <AnnotationLabel
               annotation={latestAnnotation}

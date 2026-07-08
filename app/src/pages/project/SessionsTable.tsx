@@ -13,16 +13,18 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import React, {
+  Suspense,
   startTransition,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { graphql, usePaginationFragment } from "react-relay";
+import { graphql, useLazyLoadQuery, usePaginationFragment } from "react-relay";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 
 import {
+  Counter,
   ContextualHelp,
   CopyToClipboardButton,
   Flex,
@@ -35,6 +37,7 @@ import {
 import { MeanScore } from "@phoenix/components/annotation/MeanScore";
 import { SessionAnnotationSummaryGroupTokens } from "@phoenix/components/annotation/SessionAnnotationSummaryGroup";
 import { Truncate } from "@phoenix/components/core/utility/Truncate";
+import { useTimeRange } from "@phoenix/components/datetime";
 import { selectableTableCSS } from "@phoenix/components/table/styles";
 import { TimestampCell } from "@phoenix/components/table/TimestampCell";
 import { LatencyText } from "@phoenix/components/trace/LatencyText";
@@ -53,8 +56,10 @@ import {
 } from "../../components/table";
 import type { SessionsTable_sessions$key } from "./__generated__/SessionsTable_sessions.graphql";
 import type { SessionsTableQuery } from "./__generated__/SessionsTableQuery.graphql";
+import type { SessionsTableSessionCountQuery } from "./__generated__/SessionsTableSessionCountQuery.graphql";
 import { DEFAULT_PAGE_SIZE } from "./constants";
 import { SessionColumnSelector } from "./SessionColumnSelector";
+import { SessionFilterConditionField } from "./SessionFilterConditionField";
 import { useSessionSearchContext } from "./SessionSearchContext";
 import { SessionSearchField } from "./SessionSearchField";
 import { SessionsTableEmpty } from "./SessionsTableEmpty";
@@ -73,6 +78,16 @@ const PAGE_SIZE = DEFAULT_PAGE_SIZE;
 const defaultColumnSettings = {
   minSize: 100,
 } satisfies Partial<ColumnDef<unknown>>;
+
+const toolbarFieldCSS = css`
+  flex: 1 1 260px;
+  min-width: min(100%, 240px);
+`;
+
+const toolbarFilterFieldCSS = css`
+  flex: 2 1 420px;
+  min-width: min(100%, 320px);
+`;
 
 const TableBody = <T extends { id: string }>({
   table,
@@ -135,6 +150,8 @@ export function SessionsTable(props: SessionsTableProps) {
   // we need a reference to the scrolling element for pagination logic down below
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [validSessionFilterCondition, setValidSessionFilterCondition] =
+    useState<string>("");
   const { filterIoSubstringOrSessionId } = useSessionSearchContext();
   const { fetchKey } = useStreamState();
   const { data, loadNext, hasNext, isLoadingNext, refetch } =
@@ -150,15 +167,24 @@ export function SessionsTable(props: SessionsTableProps) {
             defaultValue: { col: startTime, dir: desc }
           }
           filterIoSubstring: { type: "String", defaultValue: null }
+          sessionFilterCondition: { type: "String", defaultValue: null }
           sessionId: { type: "String", defaultValue: null }
         ) {
+          id
           name
           ...SessionColumnSelector_annotations
+          sessionFilterVocabulary {
+            name
+            type
+            description
+            category
+          }
           sessions(
             first: $first
             after: $after
             sort: $sort
             filterIoSubstring: $filterIoSubstring
+            sessionFilterCondition: $sessionFilterCondition
             timeRange: $timeRange
             sessionId: $sessionId
           ) @connection(key: "SessionsTable_sessions") {
@@ -326,7 +352,12 @@ export function SessionsTable(props: SessionsTableProps) {
       accessorKey: "sessionAnnotations",
       enableSorting: false,
       cell: ({ row }) => {
-        return <SessionAnnotationSummaryGroupTokens session={row.original} />;
+        return (
+          <SessionAnnotationSummaryGroupTokens
+            session={row.original}
+            showFilterActions
+          />
+        );
       },
     },
     ...dynamicAnnotationColumns,
@@ -451,12 +482,19 @@ export function SessionsTable(props: SessionsTableProps) {
           after: null,
           first: PAGE_SIZE,
           filterIoSubstring: filterIoSubstringOrSessionId,
+          sessionFilterCondition: validSessionFilterCondition || null,
           sessionId: filterIoSubstringOrSessionId,
         },
         { fetchPolicy: "store-and-network" }
       );
     });
-  }, [sorting, refetch, filterIoSubstringOrSessionId, fetchKey]);
+  }, [
+    sorting,
+    refetch,
+    filterIoSubstringOrSessionId,
+    validSessionFilterCondition,
+    fetchKey,
+  ]);
   const fetchMoreOnBottomReached = React.useCallback(
     (containerRefElement?: HTMLDivElement | null) => {
       if (containerRefElement) {
@@ -538,10 +576,28 @@ export function SessionsTable(props: SessionsTableProps) {
         borderBottomWidth="thin"
         flex="none"
       >
-        <Flex direction="row" gap="size-100" width="100%" alignItems="center">
-          <View flex="1 1 auto">
+        <Flex
+          direction="row"
+          gap="size-100"
+          width="100%"
+          alignItems="center"
+          wrap="wrap"
+        >
+          <div css={toolbarFieldCSS}>
             <SessionSearchField />
-          </View>
+          </div>
+          <div css={toolbarFilterFieldCSS}>
+            <SessionFilterConditionField
+              vocabulary={data.sessionFilterVocabulary}
+              onValidCondition={setValidSessionFilterCondition}
+            />
+          </div>
+          <SessionFilterMatchCount
+            projectId={data.id}
+            sessionFilterCondition={validSessionFilterCondition}
+            filterIoSubstring={filterIoSubstringOrSessionId}
+            fetchKey={fetchKey}
+          />
           <SessionColumnSelector columns={computedColumns} query={data} />
         </Flex>
       </View>
@@ -630,5 +686,93 @@ export function SessionsTable(props: SessionsTableProps) {
         </table>
       </div>
     </div>
+  );
+}
+
+function SessionFilterMatchCount({
+  projectId,
+  sessionFilterCondition,
+  filterIoSubstring,
+  fetchKey,
+}: {
+  projectId: string;
+  sessionFilterCondition: string;
+  filterIoSubstring: string;
+  fetchKey: string;
+}) {
+  const { timeRange } = useTimeRange();
+  const timeRangeVariable = {
+    start: timeRange.start?.toISOString(),
+    end: timeRange.end?.toISOString(),
+  };
+  return (
+    <Suspense fallback={<SessionFilterMatchCountDisplay count="--" />}>
+      <SessionFilterMatchCountValue
+        projectId={projectId}
+        sessionFilterCondition={sessionFilterCondition}
+        filterIoSubstring={filterIoSubstring}
+        timeRange={timeRangeVariable}
+        fetchKey={fetchKey}
+      />
+    </Suspense>
+  );
+}
+
+function SessionFilterMatchCountValue({
+  projectId,
+  sessionFilterCondition,
+  filterIoSubstring,
+  timeRange,
+  fetchKey,
+}: {
+  projectId: string;
+  sessionFilterCondition: string;
+  filterIoSubstring: string;
+  timeRange: {
+    start?: string | null;
+    end?: string | null;
+  };
+  fetchKey: string;
+}) {
+  const data = useLazyLoadQuery<SessionsTableSessionCountQuery>(
+    graphql`
+      query SessionsTableSessionCountQuery(
+        $id: ID!
+        $timeRange: TimeRange!
+        $filterIoSubstring: String
+        $sessionFilterCondition: String
+      ) {
+        project: node(id: $id) {
+          ... on Project {
+            sessionCount(
+              timeRange: $timeRange
+              filterIoSubstring: $filterIoSubstring
+              sessionFilterCondition: $sessionFilterCondition
+            )
+          }
+        }
+      }
+    `,
+    {
+      id: projectId,
+      timeRange,
+      filterIoSubstring: filterIoSubstring || null,
+      sessionFilterCondition: sessionFilterCondition || null,
+    },
+    { fetchKey, fetchPolicy: "store-and-network" }
+  );
+  return (
+    <SessionFilterMatchCountDisplay count={data.project?.sessionCount ?? 0} />
+  );
+}
+
+function SessionFilterMatchCountDisplay({ count }: { count: number | "--" }) {
+  return (
+    <Flex direction="row" gap="size-50" alignItems="center" flex="none">
+      <Text size="S" color="text-700">
+        matching sessions
+      </Text>
+      <Counter variant="quiet">{count}</Counter>
+    </Flex>
   );
 }

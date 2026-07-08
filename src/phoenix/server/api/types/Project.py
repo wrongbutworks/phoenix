@@ -311,6 +311,7 @@ class Project(Node):
         self,
         info: Info[Context, None],
         time_range: Optional[TimeRange] = UNSET,
+        filter_io_substring: Optional[str] = UNSET,
         session_filter_condition: Optional[str] = UNSET,
     ) -> int:
         start_time = time_range.start if time_range else None
@@ -324,6 +325,14 @@ class Project(Node):
             stmt = stmt.where(start_time <= models.ProjectSession.start_time)
         if end_time is not None:
             stmt = stmt.where(models.ProjectSession.start_time < end_time)
+        if filter_io_substring:
+            filtered_session_rowids = get_io_substring_session_rowids_subquery(
+                io_substring=filter_io_substring,
+                project_rowids=[self.id],
+                start_time=start_time,
+                end_time=end_time,
+            )
+            stmt = stmt.where(models.ProjectSession.id.in_(filtered_session_rowids))
         if session_filter_condition:
             filtered_session_rowids = get_filtered_session_rowids_subquery(
                 session_filter_condition=session_filter_condition,
@@ -592,11 +601,6 @@ class Project(Node):
         session_filter_condition: Optional[str] = UNSET,
         session_id: Optional[str] = UNSET,
     ) -> Connection[ProjectSession]:
-        if filter_io_substring and session_filter_condition:
-            raise BadRequest(
-                "Both a session filter condition and an IO substring filter "
-                "cannot be applied at the same time"
-            )
         table = models.ProjectSession
         if session_id:
             async with info.context.db.read() as session:

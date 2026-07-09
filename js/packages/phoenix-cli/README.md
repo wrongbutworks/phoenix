@@ -124,6 +124,48 @@ slash-command reference, model setup, and privacy controls.
 
 ---
 
+### `px setup`
+
+Interactive onboarding wizard: connect the app in the current directory to a
+Phoenix instance and get traces flowing. `setup` is a deliberate exception to
+the CLI's noun-verb layout — onboarding is a wizard, not a resource.
+
+The wizard walks you from zero to verified traces in one session:
+
+1. **Git preflight** — warns on missing/dirty git (a coding agent may edit files).
+2. **Deployment** — local `phoenix serve` or a remote instance URL (self-hosted
+   or Phoenix Cloud); an unauthenticated probe detects whether auth is on.
+3. **Connection** — auth off: pick/create a project over REST. Auth on: a
+   browser window opens where you sign in, pick a project, and authorize —
+   Phoenix mints an API key that the terminal receives securely (on older
+   Phoenix versions without browser setup, you can paste an API key instead).
+4. **Hand-off files** — writes `.env.phoenix` + `.phoenix.json` (mode 0600)
+   into the current directory and ensures both are gitignored.
+5. **Instrumentation** — copy a ready-made prompt for your coding agent
+   (Claude Code, Codex, Cursor, …) or follow the quickstart manually.
+6. **Verification** — confirm traces appear in the Phoenix UI, optionally
+   point a px profile at the project, and get the production env-var hand-off.
+
+```bash
+px setup                                                  # interactive
+px setup --endpoint https://phoenix.example.com           # skip the deployment question
+px setup --no-input --endpoint http://localhost:6006 --project my-app   # headless
+npx -y @arizeai/phoenix-cli setup                         # run without installing
+```
+
+Headless mode (`--no-input`, or auto-enabled when stdin is not a TTY) runs the
+git preflight (clean repo required), resolves the connection (auth-on needs
+`PHOENIX_API_KEY` and an existing project), writes the hand-off files, prints
+the connection summary, and exits — it never runs a coding agent. Endpoint and
+project also resolve from `PHOENIX_HOST`/`PHOENIX_COLLECTOR_ENDPOINT` and
+`PHOENIX_PROJECT`/`PHOENIX_PROJECT_NAME`.
+
+Exit codes: `0` success (including recoverable warnings), `2` cancelled
+(Ctrl-C anywhere), `3` headless missing input (prints the exact flags/vars
+needed).
+
+---
+
 ### `px self update`
 
 Check the npm registry for the latest CLI release and update the installed

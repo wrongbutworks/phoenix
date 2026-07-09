@@ -9,6 +9,8 @@ import { RouterProvider } from "react-router/dom";
 
 import { buildRouteInfoCatalog } from "@phoenix/agent/tools/getRouteInfo/catalog";
 import { registerRouteInfoCatalog } from "@phoenix/agent/tools/getRouteInfo/routeCatalogRegistry";
+import { cliSetupLoader } from "@phoenix/pages/cliSetup/cliSetupLoader";
+import { CliSetupPage } from "@phoenix/pages/cliSetup/CliSetupPage";
 import type { DatasetEvaluatorDetailsLoaderData } from "@phoenix/pages/dataset/evaluators/datasetEvaluatorDetailsLoader";
 import { datasetEvaluatorDetailsLoader } from "@phoenix/pages/dataset/evaluators/datasetEvaluatorDetailsLoader";
 import { DatasetEvaluatorDetailsPage } from "@phoenix/pages/dataset/evaluators/DatasetEvaluatorDetailsPage";
@@ -156,6 +158,12 @@ export const appRouteObjects = createRoutesFromElements(
       loader={authenticatedRootLoader}
       shouldRevalidate={revalidateOnPathChange}
     >
+      {/* Claim page for `px setup` — authenticated, but outside the app chrome */}
+      <Route
+        path="/cli-setup"
+        element={<CliSetupPage />}
+        loader={cliSetupLoader}
+      />
       <Route
         element={<Layout />}
         loader={layoutLoader}

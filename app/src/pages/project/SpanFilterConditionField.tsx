@@ -2,22 +2,10 @@ import type {
   CompletionContext,
   CompletionResult,
 } from "@codemirror/autocomplete";
-import { autocompletion } from "@codemirror/autocomplete";
 import { python } from "@codemirror/lang-python";
 import { css } from "@emotion/react";
-import type { EditorView } from "@uiw/react-codemirror";
-import CodeMirror, {
-  type BasicSetupOptions,
-  keymap,
-} from "@uiw/react-codemirror";
-import {
-  startTransition,
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import CodeMirror from "@uiw/react-codemirror";
+import { useState } from "react";
 
 import type { AgentContext } from "@phoenix/agent/context/agentContextTypes";
 import { useAdvertiseAgentContext } from "@phoenix/agent/context/useAdvertiseAgentContext";
@@ -30,55 +18,20 @@ import {
   Icons,
   Label,
   Popover,
-  Text,
-  Tooltip,
-  TooltipTrigger,
   View,
 } from "@phoenix/components";
 import { pierreDark, pierreLight } from "@phoenix/components/code";
 import { fieldBaseCSS } from "@phoenix/components/core/field/styles";
+import {
+  FilterConditionField,
+  filterConditionCodeMirrorCSS,
+  filterConditionFieldCSS,
+} from "@phoenix/components/filter";
 import { useTheme } from "@phoenix/contexts";
 import { useTracingContext } from "@phoenix/contexts/TracingContext";
 
 import { useSpanFilters } from "./SpanFiltersContext";
 import { validateSpanFilterCondition } from "./spanFilterValidation";
-
-const codeMirrorCSS = css`
-  flex: 1 1 auto;
-  .cm-content {
-    padding: var(--global-dimension-static-size-100) 0;
-  }
-  .cm-editor {
-    background-color: transparent !important;
-  }
-  .cm-focused {
-    outline: none;
-  }
-  .cm-selectionLayer .cm-selectionBackground {
-    background: var(--global-color-cyan-400) !important;
-  }
-`;
-
-const fieldCSS = css`
-  border-width: var(--global-border-size-thin);
-  border-style: solid;
-  border-color: var(--global-input-field-border-color);
-  border-radius: var(--global-rounding-small);
-  background-color: var(--global-input-field-background-color);
-  transition: all 0.2s ease-in-out;
-  overflow-x: hidden;
-  &:hover,
-  &[data-is-focused="true"] {
-    border-color: var(--global-input-field-border-color-active);
-  }
-  &[data-is-invalid="true"] {
-    border-color: var(--global-color-danger);
-  }
-  box-sizing: border-box;
-  .search-icon {
-    margin-left: var(--global-dimension-static-size-100);
-  }
-`;
 
 function filterConditionCompletions(
   context: CompletionContext
@@ -206,31 +159,6 @@ function filterConditionCompletions(
   };
 }
 
-const extensions = [
-  keymap.of([
-    {
-      key: "Enter",
-      run: (_editorView: EditorView) => {
-        // Ignore newlines
-        return true;
-      },
-    },
-  ]),
-  python(),
-  autocompletion({ override: [filterConditionCompletions] }),
-];
-
-const basicSetupOptions: BasicSetupOptions = {
-  lineNumbers: false,
-  foldGutter: false,
-  bracketMatching: true,
-  syntaxHighlighting: true,
-  highlightActiveLine: false,
-  highlightActiveLineGutter: false,
-  defaultKeymap: false,
-  searchKeymap: false,
-};
-
 type SpanFilterConditionFieldProps = {
   /**
    * Callback when the condition is valid
@@ -243,21 +171,14 @@ export function SpanFilterConditionField(props: SpanFilterConditionFieldProps) {
     onValidCondition,
     placeholder = "filter condition (e.x. span_kind == 'LLM')",
   } = props;
-  const [isFocused, setIsFocused] = useState<boolean>(false);
-  const [isConditionValidState, setIsConditionValidState] =
-    useState<boolean>(true);
-  const [errorMessage, setErrorMessage] = useState<string>("");
+  const [advertisedFilterCondition, setAdvertisedFilterCondition] =
+    useState("");
   const { filterCondition, setFilterCondition, appendFilterCondition } =
     useSpanFilters();
-  const deferredFilterCondition = useDeferredValue(filterCondition);
-  const { theme } = useTheme();
-  const codeMirrorTheme = theme === "light" ? pierreLight : pierreDark;
 
   const projectId = useTracingContext((state) => state.projectId);
 
-  const filterConditionFieldRef = useRef<HTMLDivElement>(null);
-
-  const advertisedContext = useMemo<AgentContext | null>(() => {
+  const advertisedContext: AgentContext | null = (() => {
     // Advertise a project context that carries the current spanFilter while
     // the field is mounted. The merge in `selectActiveContexts` layers this
     // on top of the route-derived project context (which carries no filter)
@@ -267,14 +188,12 @@ export function SpanFilterConditionField(props: SpanFilterConditionFieldProps) {
     if (!projectId) {
       return null;
     }
-    const trimmed = deferredFilterCondition.trim();
-    const spanFilter = isConditionValidState && trimmed ? trimmed : "";
     return {
       type: "project",
       projectNodeId: projectId,
-      spanFilter,
+      spanFilter: advertisedFilterCondition,
     };
-  }, [deferredFilterCondition, isConditionValidState, projectId]);
+  })();
 
   // Keep the agent's mounted UI context aligned with the current validated
   // filter expression while this field is rendered. The matching agent
@@ -282,76 +201,30 @@ export function SpanFilterConditionField(props: SpanFilterConditionFieldProps) {
   // `SpanFiltersProvider`, which owns the underlying state.
   useAdvertiseAgentContext(advertisedContext);
 
-  useEffect(() => {
-    let isCancelled = false;
-
-    if (deferredFilterCondition.trim() !== "") {
-      setIsConditionValidState(false);
-    }
-
-    void validateSpanFilterCondition(deferredFilterCondition, projectId).then(
-      (result) => {
-        if (isCancelled) {
-          return;
-        }
-
-        if (!result?.isValid) {
-          setErrorMessage(result?.errorMessage ?? "Invalid filter condition");
-          setIsConditionValidState(false);
-        } else {
-          setErrorMessage("");
-          setIsConditionValidState(true);
-          startTransition(() => {
-            onValidCondition(deferredFilterCondition);
-          });
-        }
-      }
-    );
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [onValidCondition, deferredFilterCondition, projectId]);
-
-  const hasError = errorMessage !== "";
-  const hasCondition = filterCondition !== "";
   return (
-    <div
-      data-is-focused={isFocused}
-      data-is-invalid={hasError}
+    <FilterConditionField
+      ariaLabel="Span filter condition"
       className="span-filter-condition-field"
-      css={fieldCSS}
-      ref={filterConditionFieldRef}
-    >
-      <Flex direction="row" alignItems="center">
-        <Icon svg={<Icons.Search />} className="search-icon" />
-        <CodeMirror
-          css={codeMirrorCSS}
-          indentWithTab={false}
-          basicSetup={basicSetupOptions}
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
-          value={filterCondition}
-          onChange={setFilterCondition}
-          height="36px"
-          width="100%"
-          theme={codeMirrorTheme}
-          placeholder={placeholder}
-          extensions={extensions}
-        />
-        <button
-          css={css`
-            margin-right: var(--global-dimension-static-size-100);
-            color: var(--global-text-color-700);
-            visibility: ${hasCondition ? "visible" : "hidden"};
-          `}
-          onClick={() => setFilterCondition("")}
-          className="button--reset"
-        >
-          <Icon svg={<Icons.CloseCircle />} />
-        </button>
+      completions={filterConditionCompletions}
+      onChange={setFilterCondition}
+      onValidCondition={onValidCondition}
+      onValidationStatusChange={({ condition, isValid }) => {
+        const trimmedCondition = condition.trim();
+        setAdvertisedFilterCondition(
+          isValid && trimmedCondition ? trimmedCondition : ""
+        );
+      }}
+      placeholder={placeholder}
+      tokenRegex={/\w*/}
+      validateCondition={(condition) =>
+        validateSpanFilterCondition(condition, projectId)
+      }
+      validationKey={projectId}
+      value={filterCondition}
+      extras={
         <DialogTrigger>
           <IconButton
+            aria-label="Open span filter condition builder"
             css={css`
               color: var(--global-text-color-700);
               border-left: 1px solid var(--global-input-field-border-color);
@@ -372,17 +245,8 @@ export function SpanFilterConditionField(props: SpanFilterConditionFieldProps) {
             />
           </Popover>
         </DialogTrigger>
-      </Flex>
-      <TooltipTrigger isOpen={hasError && isFocused}>
-        <Tooltip placement="bottom" triggerRef={filterConditionFieldRef}>
-          {errorMessage !== "" ? (
-            <Text color="danger">{errorMessage}</Text>
-          ) : (
-            <Text color="success">Valid Expression</Text>
-          )}
-        </Tooltip>
-      </TooltipTrigger>
-    </div>
+      }
+    />
   );
 }
 
@@ -467,7 +331,7 @@ function FilterConditionSnippet(props: {
       <Flex direction="row" width="100%" gap="size-100">
         <div
           css={css(
-            fieldCSS,
+            filterConditionFieldCSS,
             css`
               flex: 1 1 auto;
             `
@@ -487,7 +351,7 @@ function FilterConditionSnippet(props: {
             editable={true}
             onChange={setSnippet}
             theme={codeMirrorTheme}
-            css={codeMirrorCSS}
+            css={filterConditionCodeMirrorCSS}
           />
         </div>
         <Button

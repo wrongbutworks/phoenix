@@ -146,6 +146,9 @@ importers:
       date-fns:
         specifier: ^4.4.0
         version: 4.4.0
+      graphql:
+        specifier: ^16.14.2
+        version: 16.14.2
       lodash:
         specifier: ^4.18.1
         version: 4.18.1
@@ -333,9 +336,6 @@ importers:
       eslint-plugin-react-hooks:
         specifier: ~7.0.1
         version: 7.0.1
-      graphql:
-        specifier: ^16.14.2
-        version: 16.14.2
       jsdom:
         specifier: ^29.1.1
         version: 29.1.1

@@ -9,12 +9,16 @@ type AssistantMessageMetadata =
 /** Wire schema of the transient `data-session-summary` stream chunk. */
 type SessionSummaryChunk = components["schemas"]["SessionSummaryChunk"];
 
+/** Wire schema of the transient `data-graphql-result` stream chunk. */
+type GraphQLResultChunk = components["schemas"]["GraphQLResultChunk"];
+
 /**
  * Payloads of the custom `data-*` chunks the backend chat route streams
  * alongside the message. Keys are the chunk type without the `data-` prefix.
  */
 type AgentUIDataTypes = {
   "session-summary": SessionSummaryChunk["data"];
+  "graphql-result": GraphQLResultChunk["data"];
 };
 
 /**

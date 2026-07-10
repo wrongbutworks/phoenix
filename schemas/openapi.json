@@ -17598,6 +17598,97 @@
         "title": "WebAccessContext",
         "description": "User's per-turn request to expose web search / fetch tools."
       },
+      "GraphQLResultChunk": {
+        "additionalProperties": false,
+        "description": "Transient ``data-graphql-result`` stream chunk: emitted whenever the\nagent's ``phoenix-gql`` builtin executes an operation that returned data,\nso the client can mirror the result into its Relay store. Being transient,\nit reaches the client's ``onData`` callback but is never appended to the\nmessage parts or the persisted transcript.",
+        "properties": {
+          "type": {
+            "const": "data-graphql-result",
+            "default": "data-graphql-result",
+            "title": "Type",
+            "type": "string"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/GraphQLResultPayload"
+          },
+          "transient": {
+            "const": true,
+            "default": true,
+            "title": "Transient",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "GraphQLResultChunk",
+        "type": "object"
+      },
+      "GraphQLResultPayload": {
+        "description": "Wire schema of the ``data-graphql-result`` chunk's payload: the input and\noutput of one ``phoenix-gql`` execution, recorded so the browser can write\nthe response into its Relay store.",
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "variables": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Variables"
+          },
+          "data": {
+            "default": null,
+            "title": "Data"
+          },
+          "errors": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Errors"
+          },
+          "operationType": {
+            "enum": [
+              "query",
+              "mutation"
+            ],
+            "title": "Operationtype",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "operationType"
+        ],
+        "title": "GraphQLResultPayload",
+        "type": "object"
+      },
       "SessionSummaryChunk": {
         "additionalProperties": false,
         "description": "Transient ``data-session-summary`` stream chunk: the LLM-generated\nsession title, emitted on any turn that starts with the session still\nuntitled. Being transient, it reaches the client's ``onData`` callback\nbut is never appended to the message parts.\n\nSee the Vercel AI SDK data stream protocol:\n    - Data parts: https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol#data-parts\n    - Transient parts: https://ai-sdk.dev/docs/ai-sdk-ui/streaming-data#transient-data-parts-ephemeral",

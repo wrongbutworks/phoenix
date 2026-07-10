@@ -1021,6 +1021,14 @@ class WebAccessContext(TypedDict):
     enabled: bool
 
 
+class GraphQLResultPayload(TypedDict):
+    query: str
+    operationType: Literal["query", "mutation"]
+    variables: NotRequired[Mapping[str, Any]]
+    data: NotRequired[Any]
+    errors: NotRequired[Sequence[Any]]
+
+
 class SessionSummaryChunk(TypedDict):
     type: Literal["data-session-summary"]
     data: str
@@ -1545,6 +1553,13 @@ class UpdateAnnotationConfigResponseBody(TypedDict):
 
 class UpsertExperimentEvaluationResponseBody(TypedDict):
     data: UpsertExperimentEvaluationResponseBodyData
+
+
+class GraphQLResultChunk(TypedDict):
+    type: Literal["data-graphql-result"]
+    data: GraphQLResultPayload
+    id: NotRequired[str]
+    transient: NotRequired[bool]
 
 
 class AssignAnnotationConfigToProjectResponseBody(TypedDict):

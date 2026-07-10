@@ -58,6 +58,7 @@ from phoenix.db.insertion.helpers import OnConflict, insert_on_conflict
 from phoenix.server.agents.agent_factory import build_agent
 from phoenix.server.agents.capabilities import get_external_tool_definition
 from phoenix.server.agents.capabilities.skills import Skill
+from phoenix.server.agents.capabilities.tools.internal.bash import PhoenixGQLResult
 from phoenix.server.agents.context import (
     ChatContext,
     ResolvedContexts,
@@ -196,6 +197,32 @@ class SessionSummaryChunk(DataChunk):
 
     type: Literal["data-session-summary"] = "data-session-summary"
     data: str
+    transient: Literal[True] = True
+
+
+class GraphQLResultPayload(_CamelModel):
+    """Wire schema of the ``data-graphql-result`` chunk's payload: the input and
+    output of one ``phoenix-gql`` execution, recorded so the browser can write
+    the response into its Relay store."""
+
+    query: str
+    variables: dict[str, Any] | None = None
+    data: Any = None
+    errors: list[Any] | None = None
+    operation_type: Literal["query", "mutation"]
+
+
+@register_openapi_schema
+class GraphQLResultChunk(DataChunk):
+    """Transient ``data-graphql-result`` stream chunk: emitted whenever the
+    agent's ``phoenix-gql`` builtin executes an operation that returned data,
+    so the client can mirror the result into its Relay store. Being transient,
+    it reaches the client's ``onData`` callback but is never appended to the
+    message parts or the persisted transcript.
+    """
+
+    type: Literal["data-graphql-result"] = "data-graphql-result"
+    data: GraphQLResultPayload
     transient: Literal[True] = True
 
 
@@ -1254,6 +1281,21 @@ def create_agents_router(authentication_enabled: bool) -> APIRouter:
             nonlocal captured_bash_snapshot
             captured_bash_snapshot = snapshot
 
+        async def _publish_graphql_result_chunk(graphql_result: PhoenixGQLResult) -> None:
+            # Rides the same queue the subagent progress chunks use, which the
+            # response stream drains unconditionally while a tool is executing.
+            await subagent_message_chunks.put(
+                GraphQLResultChunk(
+                    data=GraphQLResultPayload(
+                        query=graphql_result.query,
+                        variables=graphql_result.variables,
+                        data=graphql_result.payload.get("data"),
+                        errors=graphql_result.payload.get("errors"),
+                        operation_type=graphql_result.operation_type,
+                    )
+                )
+            )
+
         agent = build_agent(
             model=model,
             docs_mcp_server=request.app.state.docs_mcp_server,
@@ -1271,6 +1313,7 @@ def create_agents_router(authentication_enabled: bool) -> APIRouter:
             allow_mutations=graphql_mutations_enabled,
             initial_bash_snapshot=initial_bash_snapshot,
             on_bash_snapshot=_capture_bash_snapshot,
+            on_graphql_result=_publish_graphql_result_chunk if bash_enabled else None,
         )
         agent_prompts = AgentPrompts()
         forced_skills: list[Skill] = []

@@ -28,7 +28,10 @@ from phoenix.server.agents.capabilities.tools.external import (
     get_external_tool_capability_function,
 )
 from phoenix.server.agents.capabilities.tools.internal import CallSubAgentCapability
-from phoenix.server.agents.capabilities.tools.internal.bash import BashCapability
+from phoenix.server.agents.capabilities.tools.internal.bash import (
+    BashCapability,
+    OnGraphQLResult,
+)
 from phoenix.server.agents.prompts import AgentPrompts
 from phoenix.server.agents.pydantic_ai import OpenInferenceCapabilityWrapper
 from phoenix.server.agents.skills import get_skills_for_contexts
@@ -74,6 +77,7 @@ def build_agent(
     allow_mutations: bool = False,
     initial_bash_snapshot: bytes | None = None,
     on_bash_snapshot: Callable[[bytes], None] | None = None,
+    on_graphql_result: OnGraphQLResult | None = None,
 ) -> AbstractAgent[AgentDependencies, AgentOutput]:
     server_agent_args = (
         server_agent,
@@ -118,6 +122,7 @@ def build_agent(
                 allow_mutations=allow_mutations,
                 initial_snapshot=initial_bash_snapshot,
                 on_snapshot=on_bash_snapshot,
+                on_graphql_result=on_graphql_result,
             )
         )
     if (prompt_cache := build_anthropic_prompt_cache_capability(model)) is not None:

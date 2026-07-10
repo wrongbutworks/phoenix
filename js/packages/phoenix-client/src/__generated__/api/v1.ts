@@ -5665,6 +5665,66 @@ export interface components {
             enabled: boolean;
         };
         /**
+         * GraphQLResultChunk
+         * @description Transient ``data-graphql-result`` stream chunk: emitted whenever the
+         *     agent's ``phoenix-gql`` builtin executes an operation that returned data,
+         *     so the client can mirror the result into its Relay store. Being transient,
+         *     it reaches the client's ``onData`` callback but is never appended to the
+         *     message parts or the persisted transcript.
+         */
+        GraphQLResultChunk: {
+            /**
+             * Type
+             * @default data-graphql-result
+             * @constant
+             */
+            type?: "data-graphql-result";
+            /**
+             * Id
+             * @default null
+             */
+            id?: string | null;
+            data: components["schemas"]["GraphQLResultPayload"];
+            /**
+             * Transient
+             * @default true
+             * @constant
+             */
+            transient?: true;
+        };
+        /**
+         * GraphQLResultPayload
+         * @description Wire schema of the ``data-graphql-result`` chunk's payload: the input and
+         *     output of one ``phoenix-gql`` execution, recorded so the browser can write
+         *     the response into its Relay store.
+         */
+        GraphQLResultPayload: {
+            /** Query */
+            query: string;
+            /**
+             * Variables
+             * @default null
+             */
+            variables?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Data
+             * @default null
+             */
+            data?: unknown;
+            /**
+             * Errors
+             * @default null
+             */
+            errors?: unknown[] | null;
+            /**
+             * Operationtype
+             * @enum {string}
+             */
+            operationType: "query" | "mutation";
+        };
+        /**
          * SessionSummaryChunk
          * @description Transient ``data-session-summary`` stream chunk: the LLM-generated
          *     session title, emitted on any turn that starts with the session still

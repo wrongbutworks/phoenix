@@ -336,6 +336,14 @@ sweeps, so the backstop no longer bounds exceptional loss from late-visible span
 criteria. The reaper floor is aligned to this lookback; changes to the lookback and interval
 must preserve the coverage relationship and move the reaper floor with them.
 """
+ENV_PHOENIX_ONLINE_EVAL_MAX_SPAN_IDS_PER_TICK = "PHOENIX_ONLINE_EVAL_MAX_SPAN_IDS_PER_TICK"
+"""
+The maximum span-id range the online-eval producer advances through in one tick.
+Defaults to 10000.
+
+Higher values increase catch-up throughput at the cost of larger per-tick transactions;
+lower values reduce transaction size but take longer to catch up to the observed frontier.
+"""
 ENV_PHOENIX_ONLINE_EVAL_PENDING_TTL_SECONDS = "PHOENIX_ONLINE_EVAL_PENDING_TTL_SECONDS"
 """
 How long a PENDING online-eval work unit may wait before the reaper marks it EXPIRED.
@@ -3235,6 +3243,13 @@ def get_env_online_eval_backstop_lookback_span_ids() -> int:
     Gets the value of the PHOENIX_ONLINE_EVAL_BACKSTOP_LOOKBACK_SPAN_IDS environment variable.
     """
     return _int_val(ENV_PHOENIX_ONLINE_EVAL_BACKSTOP_LOOKBACK_SPAN_IDS, 100_000)
+
+
+def get_env_online_eval_max_span_ids_per_tick() -> int:
+    """
+    Gets the value of the PHOENIX_ONLINE_EVAL_MAX_SPAN_IDS_PER_TICK environment variable.
+    """
+    return _int_val(ENV_PHOENIX_ONLINE_EVAL_MAX_SPAN_IDS_PER_TICK, 10_000)
 
 
 def get_env_online_eval_pending_ttl_seconds() -> float:

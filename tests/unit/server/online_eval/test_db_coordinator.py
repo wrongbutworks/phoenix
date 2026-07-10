@@ -151,6 +151,7 @@ async def test_transitions_return_false_after_lapsed_lease_is_reclaimed(
 
     reclaimed = await coordinator.claim(claimed_by="consumer-2", limit=1)
     assert [unit.work_unit_id for unit in reclaimed] == [unit_id]
+    assert reclaimed[0].attempts == 1
 
     assert not await coordinator.heartbeat(work_unit_id=unit_id, claimed_by="consumer-1")
     assert not await coordinator.complete(work_unit_id=unit_id, claimed_by="consumer-1")
@@ -160,7 +161,33 @@ async def test_transitions_return_false_after_lapsed_lease_is_reclaimed(
     row = await _get_unit(db, unit_id)
     assert row.status == "RUNNING"
     assert row.claimed_by == "consumer-2"
+    assert row.attempts == 1
     assert await coordinator.complete(work_unit_id=unit_id, claimed_by="consumer-2")
+
+
+async def test_lapsed_lease_with_exhausted_attempts_is_not_claimable(
+    db: DbSessionFactory,
+) -> None:
+    (unit_id,) = await _seed_work_units(db, 1)
+    coordinator = DbEvalWorkCoordinator(db, max_attempts=1)
+    lapsed = datetime.now(timezone.utc) - timedelta(seconds=LEASE_TTL_SECONDS + 1)
+    async with db() as session:
+        await session.execute(
+            update(models.EvalWorkUnit)
+            .where(models.EvalWorkUnit.id == unit_id)
+            .values(
+                status="RUNNING",
+                claimed_at=lapsed,
+                claimed_by="consumer-1",
+                attempts=1,
+            )
+        )
+
+    assert await coordinator.claim(claimed_by="consumer-2", limit=1) == []
+    row = await _get_unit(db, unit_id)
+    assert row.status == "RUNNING"
+    assert row.claimed_by == "consumer-1"
+    assert row.attempts == 1
 
 
 async def test_lag_reports_counts_frontier_gap_and_oldest_pending_age(

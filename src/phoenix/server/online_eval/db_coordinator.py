@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.sql.elements import ColumnElement
 
 from phoenix.db import models
@@ -50,6 +50,7 @@ class DbEvalWorkCoordinator:
             models.EvalWorkUnit.status == "PENDING",
             and_(
                 models.EvalWorkUnit.status == "RUNNING",
+                models.EvalWorkUnit.attempts < self._max_attempts,
                 models.EvalWorkUnit.claimed_at < lease_lapsed_before,
             ),
             and_(
@@ -72,6 +73,20 @@ class DbEvalWorkCoordinator:
         async with self._db() as session:
             candidates = select(models.EvalWorkUnit.id).where(self._claimable(now))
             candidates = candidates.order_by(models.EvalWorkUnit.id).limit(limit)
+            claim_values = {
+                "status": "RUNNING",
+                "claimed_at": now,
+                "claimed_by": claimed_by,
+                # A straggler outliving the stop() drain is counted; repeated interruption
+                # across the attempt ceiling is treated as a persistent failure.
+                "attempts": case(
+                    (
+                        models.EvalWorkUnit.status == "RUNNING",
+                        models.EvalWorkUnit.attempts + 1,
+                    ),
+                    else_=models.EvalWorkUnit.attempts,
+                ),
+            }
             claimed_ids: list[int] = []
             if self._db.dialect is SupportedSQLDialect.POSTGRESQL:
                 locked_ids = (
@@ -81,7 +96,7 @@ class DbEvalWorkCoordinator:
                     await session.execute(
                         update(models.EvalWorkUnit)
                         .where(models.EvalWorkUnit.id.in_(locked_ids))
-                        .values(status="RUNNING", claimed_at=now, claimed_by=claimed_by)
+                        .values(**claim_values)
                     )
                     claimed_ids = list(locked_ids)
             else:
@@ -89,7 +104,7 @@ class DbEvalWorkCoordinator:
                     cas = await session.execute(
                         update(models.EvalWorkUnit)
                         .where(models.EvalWorkUnit.id == unit_id, self._claimable(now))
-                        .values(status="RUNNING", claimed_at=now, claimed_by=claimed_by)
+                        .values(**claim_values)
                     )
                     if cas.rowcount == 1:  # type: ignore[attr-defined]
                         claimed_ids.append(unit_id)

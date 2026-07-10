@@ -29,6 +29,7 @@ from phoenix.config import (
     get_env_online_eval_backstop_lookback_span_ids,
     get_env_online_eval_frontier_lag_seconds,
     get_env_online_eval_max_pending,
+    get_env_online_eval_max_span_ids_per_tick,
     get_env_online_eval_pending_ttl_seconds,
     get_env_online_eval_retention_seconds,
 )
@@ -156,7 +157,7 @@ class OnlineEvalProducer(DaemonTask):
         self._frontier_lag_seconds = get_env_online_eval_frontier_lag_seconds()
         self._backstop_interval_seconds = get_env_online_eval_backstop_interval_seconds()
         self._backstop_lookback_span_ids = get_env_online_eval_backstop_lookback_span_ids()
-        self._max_span_ids_per_tick = 10_000
+        self._max_span_ids_per_tick = get_env_online_eval_max_span_ids_per_tick()
         # Disabled by default because expiry is terminal and blocks backstop re-materialization.
         self._pending_ttl_seconds = get_env_online_eval_pending_ttl_seconds()
         self._retention_seconds = get_env_online_eval_retention_seconds()

@@ -2731,7 +2731,7 @@ type Project implements Node {
   hasTraces: Boolean!
   recordCount(timeRange: TimeRange, filterCondition: String, sessionFilterCondition: String): Int!
   traceCount(timeRange: TimeRange, filterCondition: String, sessionFilterCondition: String): Int!
-  sessionCount(timeRange: TimeRange, filterIoSubstring: String, sessionFilterCondition: String): Int!
+  sessionCount(timeRange: TimeRange, filterIoSubstring: String, sessionFilterCondition: String, sessionId: String): Int!
   tokenCountTotal(timeRange: TimeRange, filterCondition: String): Float!
   tokenCountPrompt(timeRange: TimeRange, filterCondition: String): Float!
   tokenCountCompletion(timeRange: TimeRange, filterCondition: String): Float!
@@ -4643,6 +4643,7 @@ enum UserRoleInput {
 type ValidationResult {
   isValid: Boolean!
   errorMessage: String
+  warnings: [String!]!
 }
 
 input VercelConfigInput {

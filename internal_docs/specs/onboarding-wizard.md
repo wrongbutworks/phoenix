@@ -10,9 +10,9 @@ sentinel-based completion protocol.
 
 ## Status
 
-**Locked for hand-off, 2026-07-08.** All design questions were resolved with the maintainer
-on 2026-07-08 — the largest being that the wizard ships **inside the px CLI as `px setup`**,
-not as a separate package (§1) — leaving a single Phase-1 verification task in §12.
+**Revised for the backend-free auth flow, 2026-07-09.** The wizard ships **inside the px CLI
+as `px setup`**, not as a separate package (§1). Authenticated interactive setup temporarily
+uses a pasted API key; a future OAuth grant replaces only credential acquisition (§4).
 Implementers should treat the choices in this document as decided; deviations go back
 through the maintainer. Tracked in
 [#14129](https://github.com/Arize-ai/phoenix/issues/14129). Related but **non-blocking**:
@@ -31,8 +31,7 @@ var unification). All codebase claims below were verified against `main` on 2026
   from self-hosted; both are "remote: paste your instance URL".
 - Delegate instrumentation to a coding agent safely: git preflight, explicit full-permission
   consent, smoke tests, secret hygiene, and fallback lanes that never dead-end.
-- The auth-off lane must work against **today's Phoenix with zero backend changes**, so a
-  walking skeleton ships before any server work lands.
+- Every lane must work against **today's Phoenix with zero backend changes**.
 
 ## Non-Goals (v1)
 
@@ -42,8 +41,8 @@ var unification). All codebase claims below were verified against `main` on 2026
   installer and compiled binaries (§1.3) are macOS/Linux only in v1.
 - SDK discovery of the `.env.phoenix` hand-off file (#14130). The agent-lane mechanism is env
   injection, which works today.
-- Organizations/tenancy. Phoenix has no org concept; if Phoenix Cloud adds one later, it lives
-  entirely in the browser claim page and stays invisible to this CLI protocol.
+- Organizations/tenancy and the future OAuth grant. Both are separate follow-up work; the
+  v1 credential boundary is designed so they do not affect project resolution or later steps.
 - Telemetry. The wizard emits **no** funnel events in v1 (resolved 2026-07-08); if a concrete
   funnel-analysis need appears, it is its own reviewed feature.
 
@@ -58,7 +57,7 @@ var unification). All codebase claims below were verified against `main` on 2026
 | **hand-off files** | `.env.phoenix` + `.phoenix.json`, written into cwd for the human. |
 | **agent / coding tool** | Claude Code or Codex CLI, run headless by the wizard. |
 | **sentinel** | `INSTRUMENTATION_COMPLETE` / `INSTRUMENTATION_INCOMPLETE` in agent final text. |
-| **wizard session** | The device-auth-style browser handshake (auth-on lane only). |
+| **credential acquisition** | The auth-on step that currently prompts for an API key and can later be replaced by OAuth. |
 
 ---
 
@@ -114,7 +113,7 @@ js/packages/phoenix-cli/
       steps/
         gitPreflight.ts
         deployment.ts          # deployment select + auth probe
-        connect.ts             # lane dispatch: authOff | wizardSession | headless
+        connect.ts             # lane dispatch: authOff | pastedApiKey | headless
         materialize.ts         # hand-off files + gitignore
         instrumentation.ts     # mode select, consent, agent run, own-agent, manual
         verify.ts              # verification + production checkpoints, outro
@@ -126,7 +125,6 @@ js/packages/phoenix-cli/
         ansi.ts                # strip/emit escape codes, single-lining, truncation
       net/
         restClient.ts          # tiny fetch wrapper w/ timeouts (Phoenix v1 REST)
-        wizardSession.ts       # create/poll client w/ backoff (§4)
       agents/
         types.ts               # Adapter, CodingToolStatus, CodingToolEvent, CommandSpec
         registry.ts            # [claudeAdapter, codexAdapter]
@@ -149,11 +147,12 @@ is already in the package (clack, commander) or Node builtins.
 
 House rules (enforced in review):
 
-- **No confirm primitive in the wizard.** `ui/` exposes only `select()` and `textInput()`;
+- **No confirm primitive in the wizard.** `ui/` exposes `select()`, `textInput()`, and masked
+  `passwordInput()`;
   `selectBoolean` is a select. (px's existing `confirmAction` is not used by setup.)
 - **All copy in `copy.ts`.** Control flow references copy; copy never references control flow.
 - **Every effect behind `WizardDeps`.** No module under `setup/` other than `deps.ts` touches
-  `process.env`, `fetch`, `child_process`, the clipboard, or the browser opener directly.
+  `process.env`, `fetch`, `child_process`, or the clipboard directly.
 
 ### 1.2 `WizardDeps` and options
 
@@ -162,14 +161,14 @@ interface WizardOptions {
   endpoint?: string;        // --endpoint: pre-answer deployment question
   project?: string;         // --project: name or Relay Global ID
   noInput?: boolean;        // --no-input: headless mode (also auto-on when !stdin.isTTY, per px convention)
-  appUrl?: string;          // hidden --app-url: browser-flow origin override (dev)
   apiUrl?: string;          // hidden --api-url: REST origin override (dev)
 }
 
 interface Prompter {
   select<T>(args: { message: string; options: Array<{ value: T; label: string; hint?: string }> }): Promise<T>;
   textInput(args: { message: string; defaultValue?: string; validate?: (v: string) => string | undefined }): Promise<string>;
-  // both throw WizardCancelledError on Ctrl-C / Escape
+  passwordInput(args: { message: string; validate?: (v: string) => string | undefined }): Promise<string>;
+  // all throw WizardCancelledError on Ctrl-C / Escape
 }
 
 interface WizardDeps {
@@ -178,10 +177,8 @@ interface WizardDeps {
   options: WizardOptions;
   stdinIsTTY: boolean;
   prompter: Prompter;                                 // real: clack-backed ui/prompter.ts; tests: scripted answers
-  openBrowser(url: string): Promise<boolean>;        // false = failed, not fatal
   writeClipboard(text: string): Promise<boolean>;
   fetch: typeof fetch;                                // injected for tests
-  sleep(ms: number): Promise<void>;
   exec(spec: CommandSpec): Promise<ExecResult>;       // one-shot (git, probes)
   spawnStreaming(spec: CommandSpec): StreamingChild;  // agent runs
   now(): number;
@@ -196,8 +193,8 @@ first** — it is the reason the whole wizard is unit-testable (§10).
 `PHOENIX_PROJECT`), then defaults — additionally accepting `PHOENIX_COLLECTOR_ENDPOINT` and
 `PHOENIX_PROJECT_NAME` as endpoint/project aliases (per #14131). There are **no
 wizard-specific env vars**. The `--no-input` flag — not the presence of env vars — is what
-opts into skipping the browser, so an ambient `PHOENIX_API_KEY` in a dev shell never silently
-short-circuits the interactive flow.
+allows ambient credentials to short-circuit prompts, so a `PHOENIX_API_KEY` in a developer
+shell is never consumed silently during an interactive run.
 
 **Headless scope** (resolved 2026-07-08): headless runs steps 1–4 only — git preflight
 (clean repo required, else exit `FAILURE` with the explanation), connection, hand-off files —
@@ -301,10 +298,9 @@ start (px setup — zero-install: npx @arizeai/phoenix-cli setup, or curl instal
   ├─ 3. Establish connection
   │     auth OFF: prompt project name (default: cwd directory name)
   │               GET /v1/projects/{name} first; 404 → POST /v1/projects → Global ID
-  │     auth ON + headless: resolve project via REST with PHOENIX_API_KEY, skip browser
-  │     auth ON:  create wizard session → open browser
-  │               print verification code + fallback URL
-  │               poll until {api_key, project_id, project_name}
+  │     auth ON + headless: resolve project via REST with PHOENIX_API_KEY
+  │     auth ON + interactive: paste API key into a masked prompt
+  │               resolve/create project with the key; retry only the key on 401
   │
   ├─ 4. Write hand-off files (0600) into cwd, ensure gitignored
   │     endpoint + project always; PHOENIX_API_KEY line only when auth is on
@@ -399,7 +395,9 @@ interface Connection {
 propagates; see Appendix A), re-GET by name before surfacing an error. A sibling fix making
 POST return 409 is filed in §9 but the wizard must not depend on it.
 
-**Auth-on interactive lane:** the wizard-session protocol (§4).
+**Auth-on interactive lane:** prompt for an API key with masked input, then resolve/create
+the project over the existing REST API. A 401 re-prompts only for the key; the selected
+project is retained. See the credential-acquisition boundary in §4.
 
 **Auth-on headless lane:** requires `PHOENIX_API_KEY` + project (flag or env). Resolve via
 `GET /v1/projects/{project_identifier}` with `Authorization: Bearer` — the identifier accepts
@@ -519,110 +517,52 @@ production checkpoint regardless.
 
 ---
 
-## 4. Wizard-session protocol (auth-on lane; net-new backend)
+## 4. Auth credential acquisition (backend-free)
 
-A device-authorization-style flow. The CLI never handles passwords or OAuth; the web app does
-all account/project work and hands back an API key. Endpoints are mounted **only when auth is
-enabled** (same conditional as the existing auth routers in `src/phoenix/server/app.py`).
+The auth-on interactive flow uses only existing Phoenix APIs:
 
-**Namespace:** there is no `/api/...` namespace in Phoenix (routers mount at `/v1`, `/auth`,
-`/oauth2`, `/graphql`); these endpoints live under **`/auth/wizard-sessions`**, mounted with
-the same auth-enabled conditional as the `/auth` router and reusing its rate-limiter wiring
-(`ServerRateLimiter` + `fastapi_ip_rate_limiter` from `phoenix.server.rate_limiters`).
+1. Explain where to create or copy an API key in Phoenix Settings.
+2. Read the key through `Prompter.passwordInput`, which masks terminal input.
+3. Resolve or create the chosen project with `Authorization: Bearer <key>`.
+4. On 401, retain the project choice and return to the key prompt. Other failures use the
+   normal connection error path.
+5. Return the same `Connection` shape consumed by hand-off, instrumentation, verification,
+   and px profile steps.
 
-### 4.1 Endpoints
+There is no setup-session table, migration, router, polling client, retention hook, or
+frontend claim route. The key is never printed; redaction still guards errors, and local
+credential files retain their existing `0600` permissions and gitignore coverage.
 
-`POST {host}/auth/wizard-sessions` (create) — no auth, rate-limited per IP, 15s client
-timeout.
+### 4.1 Future OAuth grant refactor
 
-```json
-// 201
-{
-  "session_token": "<opaque 128-bit base64url>",
-  "poll_token": "<opaque 128-bit base64url>",
-  "expires_at": "2026-07-07T21:15:00Z",          // 15 minutes
-  "login_path": "/cli-setup?session=<session_token>",
-  "verification_code": "KRFT-2946"                // 8 chars, XXXX-XXXX, no ambiguous glyphs
+OAuth should replace only the `promptForApiKey` credential provider in `steps/connect.ts`.
+Keep project resolution and every downstream step independent of how the key was acquired:
+
+```ts
+interface CredentialProvider {
+  acquireApiKey(args: { endpoint: string }): Promise<string>;
 }
 ```
 
-`GET {host}/auth/wizard-sessions/poll?session_token=…` — `Authorization: Bearer
-<poll_token>`, 30s client per-request timeout.
+The OAuth implementation may open a browser and exchange a grant for a Phoenix API key, but
+that protocol must be designed separately. Do not reintroduce the deleted setup-session
+backend as an interim abstraction. Preserve the pasted-key provider as an explicit fallback
+for self-hosted or constrained environments.
 
-```json
-{ "status": "pending" }
-{ "status": "expired" }
-{ "status": "claimed" }     // payload already delivered to another poller — single-use
-{ "status": "complete", "api_key": "…", "project_id": "…", "project_name": "…" }
-```
+Refactor sequence:
 
-Split-token design: `session_token` identifies the session (and appears in the browser URL);
-`poll_token` authorizes polling and never leaves the terminal; the browser holds the third
-credential (the user's session cookie). A leaked login URL therefore cannot be used to poll
-for the key, and a leaked poll token cannot complete the session.
-
-Client polling policy (`net/wizardSession.ts`): every 2s; on HTTP 429 add +1s per hit, capped
-at 30s; 3-minute hard timeout → warn + offer retry / fallback to manual lane.
-
-### 4.2 Server storage and semantics
-
-New table `cli_wizard_sessions`: `id`, `session_token_hash`, `poll_token_hash` (store SHA-256
-of tokens, never plaintext), `verification_code`, `status`
-(`pending|complete|claimed|expired`), `user_id` (nullable until claim), `project_id`
-(nullable), `api_key_payload` (nullable, encrypted-at-rest via existing secret machinery),
-`created_at`, `expires_at`, `delivered_at`.
-
-- **Single delivery:** the first authorized poll that observes `complete` receives the
-  `api_key` payload; the row is then scrubbed (`api_key_payload = NULL`,
-  `status = 'claimed'`). A subsequent poll gets `claimed`. This is the only meaning of
-  "claimed".
-- Expiry is enforced on read; a periodic sweep deletes rows past `expires_at` by adding a
-  cleanup call to the existing hourly `TraceDataSweeper` daemon loop
-  (`src/phoenix/server/retention.py`, following the `_delete_orphan_sessions` pattern).
-- Completion happens via an authenticated (cookie) endpoint called by the claim page:
-  `POST /auth/wizard-sessions/complete` with `{ session_token, project_id }` — the handler
-  verifies the session is `pending` and unexpired, **rejects `VIEWER`-role users with 403**
-  (see §4.3), mints a **user API key** through the same path as the existing
-  `createUserApiKey` GraphQL mutation
-  (`src/phoenix/server/api/mutations/api_key_mutations.py` → `token_store.create_api_key`),
-  names it `cli-setup <date>`, **with no expiry** (resolved 2026-07-08: the production
-  hand-off step tells users to put this key in their production secret store, so a
-  time-bombed key is wrong; users can revoke in settings), and stores the encrypted payload
-  for the poller. Whether this is REST or a GraphQL mutation is an implementer's choice; REST
-  keeps it symmetric with create/poll.
-
-Phoenix API keys are **role-scoped, not project-scoped** — the key is a deployment-wide
-credential for the user's role; the project is routing metadata. Copy must not imply the key
-is limited to the project.
-
-**Viewer guard** (resolved 2026-07-08): VIEWER users can mint user API keys today, but the v1
-router's viewer guard 403s all non-GET requests — so a viewer key **cannot ingest traces over
-HTTP OTLP** (it is inconsistently accepted over gRPC; upstream issue, §9). The wizard flow
-must therefore **block viewers at the claim page and at the complete endpoint** with copy:
-"Your role can't send traces — ask an admin to upgrade your role or run setup." Failing fast
-here beats a "successful" wizard run whose traces silently never arrive.
-
-### 4.3 Browser claim page
-
-New frontend route `/cli-setup` (auth-gated like the rest of the app; the existing
-`returnUrl` login redirect preserves path + query — verified in `app/src/authFetch.ts` /
-`app/src/utils/routingUtils.ts`; note it does not preserve hash fragments, which this flow
-does not use):
-
-1. Display the **verification code** prominently, with an explicit acknowledgment: the
-   Authorize control is inert until the user confirms "This code matches my terminal:
-   `KRFT-2946`." (Phishing resistance — the terminal prints the same code before opening the
-   browser; requiring the acknowledgment makes the comparison an action, not a suggestion.)
-2. Project picker: existing projects list + "create new project" inline (name field), reusing
-   existing project components.
-3. "Authorize" button → complete endpoint → success screen: "Return to your terminal."
-4. Expired/claimed sessions render a clear error with "re-run the wizard" copy. VIEWER-role
-   users see the role-block message (§4.2) instead of the picker.
-
-Signup and signin are whatever the deployment already supports (password/LDAP/OAuth2) — the
-claim page sits behind the normal login wall and adds nothing to auth itself. The `auth=`
-query param (`signin|signup`) from the original design is dropped for v1: Phoenix's login page
-handles both, and Cloud can add funnel hints later without CLI changes.
+1. **Now:** keep masked API-key entry as the only interactive provider and validate the
+   result through existing project REST calls.
+2. **Introduce the provider boundary:** move credential acquisition out of project
+   resolution and inject a `CredentialProvider` into the auth-on connection lane. The lane
+   must continue to consume only the returned API key.
+3. **Add OAuth:** implement the grant as a second provider, including its own browser/error/
+   cancellation behavior, without changing `Connection` or downstream wizard steps.
+4. **Retain fallback:** if OAuth is unavailable or the user chooses manual setup, invoke the
+   pasted-key provider. Do not silently consume `PHOENIX_API_KEY` in an interactive run.
+5. **Contract-test providers:** both providers must return the same credential shape; shared
+   tests cover cancellation, redaction, invalid credentials, project retention across retry,
+   hand-off file permissions, and px-profile persistence.
 
 ---
 
@@ -844,7 +784,7 @@ spawns a real agent or a real server**. Fake `WizardDeps` throughout.
 |---|---|
 | `options.ts` | flag/env matrix incl. resolveConfig precedence + `PHOENIX_COLLECTOR_ENDPOINT`/`PHOENIX_PROJECT_NAME` aliases, headless auto-detection |
 | deployment probe | fake fetch: 200 / 401 / 403 / ECONNREFUSED / non-JSON |
-| wizard-session client | fake fetch + fake sleep: pending→complete, 429 backoff (+1s/hit, 30s cap), expiry, claimed, 3-min timeout |
+| auth-on credential entry | masked prompt; 401 re-prompts only the key and retains the project choice |
 | auth-off connect | resolve-first matrix: GET 200 / GET 404→POST / POST 500-on-race→re-GET |
 | `gitignoreCoverage` | pattern-coverage cases (`.env*` covers `.env.phoenix`; negations; missing trailing newline) |
 | hand-off files | content snapshot, mode 0600, key line present/absent by lane |
@@ -855,9 +795,6 @@ spawns a real agent or a real server**. Fake `WizardDeps` throughout.
 | completion protocol | result-file / sentinel / exit-code+regex priority matrix |
 | `redact.ts` | bearer/env/JWT shapes |
 | full-flow | scripted select answers through fake deps: auth-on happy path, auth-off happy path, cancel-at-every-step (always exit `CANCELLED`), every failure→fallback lane, headless stops after step 4 |
-
-Backend: standard route tests for create/poll/complete (token hashing, single delivery,
-expiry, rate limit, viewer 403) in `tests/unit/server/`.
 
 Phase-4 CI adds one integration smoke job running the real `claude`/`codex` smoke commands to
 catch flag drift (allowed-to-fail initially, promoted once stable).
@@ -884,16 +821,12 @@ the agent/sentinel section (content derived from the phoenix-tracing skill).
 reviewable diff, traces verified; lane (b) prompt works when pasted into a fresh agent; all
 agent failures degrade to warnings that still reach verification.
 
-**Phase 3 — auth-on lane.**
-Server: `cli_wizard_sessions` table + create/poll/complete endpoints under
-`/auth/wizard-sessions` (auth-enabled-only mount, viewer block, no-expiry key minting,
-sweeper hook) + claim page at `/cli-setup` (verification-code acknowledgment, project picker,
-viewer block copy). Client: browser flow with verification code, polling with backoff,
-headless (`--no-input`) path, px profile key persistence.
-*Accept:* against an auth-enabled deployment, browser flow ends with a minted user API key in
-`.env.phoenix` and verified traces; poll token cannot be replayed after delivery; expired and
-claimed sessions render correct copy on both ends; a VIEWER user is blocked at the claim page
-and the complete endpoint; headless mode works in a TTY-less run with standard env vars.
+**Phase 3 — auth-on lane without backend changes.**
+Interactive masked API-key entry, authenticated project resolution/creation, 401 retry,
+headless (`--no-input`) path, and px profile key persistence.
+*Accept:* against an auth-enabled deployment, a pasted API key reaches `.env.phoenix` and
+verified traces; invalid keys re-prompt without losing the project choice; headless mode
+works in a TTY-less run with standard env vars. OAuth grant support is a separate follow-up.
 
 **Phase 4 — polish.**
 Windows discovery/paths, agent-binary smoke CI, background-overlap tuning.
@@ -913,10 +846,10 @@ install replaces the binary rather than attempting an npm update.
 - **Read-only / viewer-role probe fidelity** (§3.2): confirm during Phase 1 and adjust the
   probe or the create-fallback. This is a Phase-1 verification task, not a design blocker.
 
-Everything else is resolved (2026-07-08, recorded inline above): packaging → in-CLI
+Everything else is resolved (updated 2026-07-09, recorded inline above): packaging → in-CLI
 `px setup`; Cloud → folded into the remote-URL option; quickstart → single all-language
-agent-facing page derived from the phoenix-tracing skill; viewer handling → block at claim
-page + complete endpoint; minted key → no expiry; px lane → in-process profile step after
+agent-facing page derived from the phoenix-tracing skill; authenticated setup → masked API
+key paste for now, OAuth grant later; px lane → in-process profile step after
 verification; headless → stops after hand-off files, never runs an agent; telemetry → none
 in v1; exit codes → px semantics; binary distribution → full px binary via Bun compile +
 curl installer; installer hosting → self-contained raw-GitHub URL, optionally also published
@@ -951,18 +884,12 @@ Facts this design relies on, verified 2026-07-07/08:
   (`src/phoenix/server/api/mutations/api_key_mutations.py`); keys are role-scoped JWTs via
   `token_store.create_api_key`; `createUserApiKey` accepts optional `expires_at` and is
   **not** restricted for viewers (permission classes: `IsNotReadOnly, IsLocked`) — the minted
-  key inherits the caller's role.
+  key inherits the caller's role. The temporary wizard flow asks users to create a key through
+  the existing UI and does not add another minting endpoint.
 - **Viewer-key ingest inconsistency:** HTTP OTLP `POST /v1/traces` is blocked for viewers by
   the router-level guard; gRPC OTLP's `ApiKeyInterceptor` validates the token but never
-  checks role (`src/phoenix/server/grpc_server.py`, `bearer_auth.py:120-142`). Wizard blocks
-  viewers at claim time (§4.2); upstream fix filed in §9.
-- **Housekeeping hook:** `TraceDataSweeper` is an hourly self-scheduled asyncio `DaemonTask`
-  (`src/phoenix/server/retention.py`) whose loop already batch-deletes orphaned sessions
-  (`_delete_orphan_sessions`); wizard-session expiry sweeps piggyback there.
-- **Login redirect preserves path + query:** 401s route through
-  `createLoginRedirectUrl()` → `/login?returnUrl=<pathname+search>`
-  (`app/src/authFetch.ts`, `app/src/utils/routingUtils.ts`); hash fragments are not preserved
-  (unused by this flow).
+  checks role (`src/phoenix/server/grpc_server.py`, `bearer_auth.py:120-142`). This remains
+  sibling work rather than setup-wizard backend scope.
 - **Project REST exists:** `GET/POST /v1/projects`, `GET /v1/projects/{project_identifier}`
   accepting a Relay Global ID or a name; name-as-identifier can't contain `/ ? #`
   (`src/phoenix/server/api/routers/v1/projects.py`, `…/v1/utils.py`).

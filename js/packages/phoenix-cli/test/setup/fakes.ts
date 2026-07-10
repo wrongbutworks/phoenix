@@ -84,6 +84,24 @@ export function scriptedPrompter(answers: ScriptedAnswer[]): ScriptedPrompter {
       }
       return value;
     },
+    async passwordInput(args: {
+      message: string;
+      validate?: (value: string) => string | undefined;
+    }): Promise<string> {
+      transcript.push(args.message);
+      const answer = next(args.message);
+      if (answer === CANCEL) {
+        throw new WizardCancelledError();
+      }
+      const value = String(answer ?? "");
+      const problem = args.validate?.(value);
+      if (problem) {
+        throw new Error(
+          `Scripted answer "${value}" failed validation: ${problem}`
+        );
+      }
+      return value;
+    },
     note(message: string): void {
       output.push(message);
     },
@@ -133,35 +151,28 @@ export interface FakeDepsArgs {
   prompter?: Prompter;
   fetch?: typeof fetch;
   exec?: (spec: CommandSpec) => Promise<ExecResult>;
-  openBrowser?: (url: string) => Promise<boolean>;
   writeClipboard?: (text: string) => Promise<boolean>;
   now?: () => number;
 }
 
 export function buildFakeDeps(args: FakeDepsArgs = {}): WizardDeps {
-  let clock = 0;
   return {
     cwd: args.cwd ?? "/tmp/fake-cwd",
     env: args.env ?? {},
     options: args.options ?? {},
     stdinIsTTY: args.stdinIsTTY ?? true,
     prompter: args.prompter ?? scriptedPrompter([]),
-    openBrowser: args.openBrowser ?? (async () => true),
     writeClipboard: args.writeClipboard ?? (async () => true),
     fetch:
       args.fetch ??
       (async () => {
         throw new TypeError("fetch failed: no fake fetch configured");
       }),
-    // Fake sleep advances the fake clock so polling loops terminate.
-    sleep: async (ms: number) => {
-      clock += ms;
-    },
     exec: args.exec ?? (async () => ({ exitCode: 0, stdout: "", stderr: "" })),
     spawnStreaming: (): StreamingChild => {
       throw new Error("spawnStreaming not faked");
     },
-    now: args.now ?? (() => clock),
+    now: args.now ?? (() => 0),
   };
 }
 

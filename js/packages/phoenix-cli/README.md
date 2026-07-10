@@ -135,10 +135,9 @@ The wizard walks you from zero to verified traces in one session:
 1. **Git preflight** — warns on missing/dirty git (a coding agent may edit files).
 2. **Deployment** — local `phoenix serve` or a remote instance URL (self-hosted
    or Phoenix Cloud); an unauthenticated probe detects whether auth is on.
-3. **Connection** — auth off: pick/create a project over REST. Auth on: a
-   browser window opens where you sign in, pick a project, and authorize —
-   Phoenix mints an API key that the terminal receives securely (on older
-   Phoenix versions without browser setup, you can paste an API key instead).
+3. **Connection** — auth off: pick/create a project over REST. Auth on: create
+   or copy an API key in Phoenix Settings and paste it into a masked prompt;
+   the wizard validates it while resolving or creating the project.
 4. **Hand-off files** — writes `.env.phoenix` + `.phoenix.json` (mode 0600)
    into the current directory and ensures both are gitignored.
 5. **Instrumentation** — copy a ready-made prompt for your coding agent

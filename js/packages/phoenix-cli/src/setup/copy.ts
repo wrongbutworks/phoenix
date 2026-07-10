@@ -140,38 +140,19 @@ export const CONNECT = {
 } as const;
 
 // ---------------------------------------------------------------------------
-// Auth-on browser flow (wizard session, spec §4)
+// Auth-on credential entry (spec §4)
 // ---------------------------------------------------------------------------
 
-export const WIZARD_SESSION = {
-  starting: "Connecting your terminal to Phoenix…",
-  codeIntro: "Your verification code:",
-  codeExplainer: (code: string) =>
-    [
-      "A browser window will open so you can sign in and pick a project.",
-      `Before authorizing, check the page shows this same code: ${code}`,
-    ].join("\n"),
-  browserOpened: (url: string) => `Opened ${url}`,
-  browserFailed: (url: string) =>
-    `Couldn't open a browser. Open this URL yourself:\n${url}`,
-  waiting: "Waiting for you to authorize in the browser…",
-  timedOut: "Timed out waiting for browser authorization (3 minutes).",
-  expired: "The setup session expired before it was authorized.",
-  claimed:
-    "This setup session was already used. Re-run `px setup` to start a new one.",
-  retryMessage: "What do you want to do?",
-  retryYes: "Try the browser flow again",
-  retryPaste: "Paste an API key instead",
-  retryNo: "Exit setup",
-  notSupported: [
-    "This Phoenix version doesn't support browser-based CLI setup.",
-    "You can paste an API key instead (create one in Phoenix under Settings).",
+export const API_KEY = {
+  instructionsTitle: "Phoenix API key",
+  instructions: [
+    "Create or copy an API key in Phoenix under Settings, then paste it here.",
+    "The key is masked while you type and is only written to local credential files.",
   ].join("\n"),
   pasteKeyMessage: "Phoenix API key",
   pasteKeyInvalid: "API key can't be empty.",
   pasteKeyRejected:
     "That API key was rejected by the instance (401). Try again.",
-  complete: "Terminal authorized.",
 } as const;
 
 // ---------------------------------------------------------------------------

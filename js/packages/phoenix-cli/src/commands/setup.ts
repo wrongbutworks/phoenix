@@ -24,7 +24,6 @@ interface SetupCommandOptions {
   endpoint?: string;
   project?: string;
   input?: boolean;
-  appUrl?: string;
   apiUrl?: string;
 }
 
@@ -33,7 +32,6 @@ async function setupHandler(options: SetupCommandOptions): Promise<void> {
     endpoint: options.endpoint,
     project: options.project,
     noInput: options.input === false,
-    appUrl: options.appUrl,
     apiUrl: options.apiUrl,
   };
   const deps = buildDefaultDeps(wizardOptions);
@@ -77,11 +75,6 @@ export function createSetupCommand(): Command {
     .option(
       "--no-input",
       "Headless mode: no prompts; resolves the connection, writes hand-off files, and exits"
-    )
-    .addOption(
-      command
-        .createOption("--app-url <url>", "Browser-flow origin override (dev)")
-        .hideHelp()
     )
     .addOption(
       command

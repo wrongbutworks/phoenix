@@ -10,13 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from phoenix.db.constants import DEFAULT_PROJECT_TRACE_RETENTION_POLICY_ID
 from phoenix.db.helpers import SupportedSQLDialect
-from phoenix.db.models import (
-    Project,
-    ProjectSession,
-    ProjectTraceRetentionPolicy,
-    SetupSession,
-    Trace,
-)
+from phoenix.db.models import Project, ProjectSession, ProjectTraceRetentionPolicy, Trace
 from phoenix.server.dml_event import SpanDeleteEvent
 from phoenix.server.dml_event_handler import DmlEventHandler
 from phoenix.server.prometheus import (
@@ -30,10 +24,6 @@ logger = logging.getLogger(__name__)
 
 _ORPHAN_SESSION_DELETE_BATCH_SIZE = 1000
 _ORPHAN_SESSION_GRACE_PERIOD = timedelta(hours=1)
-
-# Expired `px setup` sessions are kept for a grace period so the claim page
-# can still render a clear "expired" message shortly after expiry.
-_SETUP_SESSION_GRACE_PERIOD = timedelta(hours=1)
 
 
 class TraceDataSweeper(DaemonTask):
@@ -62,10 +52,6 @@ class TraceDataSweeper(DaemonTask):
                 await self._delete_orphan_sessions()
             except Exception:
                 logger.exception("Failed to delete orphaned project sessions")
-            try:
-                await self._delete_expired_setup_sessions()
-            except Exception:
-                logger.exception("Failed to delete expired CLI setup sessions")
 
     async def _get_policies(self) -> list[ProjectTraceRetentionPolicy]:
         stmt = sa.select(ProjectTraceRetentionPolicy).options(
@@ -104,19 +90,6 @@ class TraceDataSweeper(DaemonTask):
         except Exception:
             logger.exception(f"Failed to apply retention policy '{policy.name}' (id={policy.id})")
             RETENTION_POLICY_EXECUTIONS.labels(status="error").inc()
-
-    async def _delete_expired_setup_sessions(self) -> None:
-        """Delete `px setup` sessions past expiry (plus a grace period).
-
-        Expiry is already enforced on read by the setup-session endpoints;
-        this sweep just keeps the table from accumulating dead rows. The
-        grace period lets the claim page render a clear "expired" message
-        for a short while after expiry.
-        """
-        cutoff = self._now() - _SETUP_SESSION_GRACE_PERIOD
-        stmt = sa.delete(SetupSession).where(SetupSession.expires_at < cutoff)
-        async with self._db() as session:
-            await session.execute(stmt)
 
     async def _delete_orphan_sessions(self) -> None:
         """Delete session rows whose traces are all gone and whose last activity is old.

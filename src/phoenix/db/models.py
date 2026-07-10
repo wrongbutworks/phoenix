@@ -2282,38 +2282,6 @@ class ApiKey(HasId):
     __table_args__ = (dict(sqlite_autoincrement=True),)
 
 
-SetupSessionStatus: TypeAlias = Literal["pending", "complete", "claimed", "expired"]
-
-
-class SetupSession(HasId):
-    """A device-authorization-style session for `px setup` (the CLI wizard).
-
-    Tokens are stored as SHA-256 hashes, never plaintext. The minted API key
-    travels through ``api_key_payload`` (encrypted at rest) exactly once: the
-    first authorized poll that observes ``complete`` receives it, after which
-    the payload is scrubbed and the status becomes ``claimed``.
-    """
-
-    __tablename__ = "setup_sessions"
-    session_token_hash: Mapped[str] = mapped_column(String, unique=True, index=True)
-    poll_token_hash: Mapped[str] = mapped_column(String, nullable=False)
-    verification_code: Mapped[str] = mapped_column(String, nullable=False)
-    status: Mapped[SetupSessionStatus] = mapped_column(String, nullable=False)
-    user_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    project_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("projects.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    api_key_payload: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(UtcTimeStamp, server_default=func.now())
-    expires_at: Mapped[datetime] = mapped_column(UtcTimeStamp, nullable=False, index=True)
-    delivered_at: Mapped[Optional[datetime]] = mapped_column(UtcTimeStamp, nullable=True)
-    __table_args__ = (dict(sqlite_autoincrement=True),)
-
-
 CostType: TypeAlias = Literal["DEFAULT", "OVERRIDE"]
 
 

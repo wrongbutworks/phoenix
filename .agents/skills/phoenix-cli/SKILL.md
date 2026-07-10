@@ -63,7 +63,7 @@ Always use `--format raw --no-progress` when piping to `jq`.
 `px setup` is an interactive wizard (a top-level exception to the noun-verb
 layout) that connects the app in the current directory to a Phoenix
 deployment: probes the endpoint for auth, resolves/creates a project (auth-on
-uses a browser handshake that mints an API key), writes `.env.phoenix` +
+prompts for an API key with masked input), writes `.env.phoenix` +
 `.phoenix.json` hand-off files (0600, gitignored), and hands off
 instrumentation. **Do not run `px setup` from inside an agent-driven
 instrumentation task** — it is for humans; agents should read `.env.phoenix`'s

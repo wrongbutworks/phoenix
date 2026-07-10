@@ -91,7 +91,6 @@ from phoenix.server.api.dataloaders import CacheForDataLoaders
 from phoenix.server.api.routers import (
     create_agents_router,
     create_auth_router,
-    create_setup_sessions_router,
     create_v1_router,
     oauth2_router,
 )
@@ -1039,8 +1038,6 @@ def create_app(
         # Only register LDAP endpoint if LDAP is configured
         app.include_router(create_auth_router(ldap_enabled=ldap_config is not None))
         app.include_router(oauth2_router)
-        # Device-auth-style sessions for `px setup` (the CLI wizard)
-        app.include_router(create_setup_sessions_router())
 
     def _openapi() -> dict[str, Any]:
         """Generate the OpenAPI schema served to Swagger UI.

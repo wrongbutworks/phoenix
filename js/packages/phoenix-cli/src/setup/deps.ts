@@ -2,10 +2,10 @@
  * Dependency injection seam for the setup wizard.
  *
  * Every side effect the wizard performs — env access, network, subprocesses,
- * clipboard, browser, time — goes through `WizardDeps`. No other module under
- * `setup/` may touch `process.env`, `fetch`, `child_process`, the clipboard,
- * or the browser opener directly. This is what makes the whole wizard
- * unit-testable with fakes (spec §1.2, §10).
+ * clipboard, time — goes through `WizardDeps`. No other module under
+ * `setup/` may touch `process.env`, `fetch`, `child_process`, or the clipboard
+ * directly. This is what makes the whole wizard unit-testable with fakes
+ * (spec §1.2, §10).
  */
 
 import { spawn } from "node:child_process";
@@ -21,8 +21,6 @@ export interface WizardOptions {
   project?: string;
   /** --no-input: headless mode (also auto-on when !stdin.isTTY, per px convention) */
   noInput?: boolean;
-  /** hidden --app-url: browser-flow origin override (dev) */
-  appUrl?: string;
   /** hidden --api-url: REST origin override (dev) */
   apiUrl?: string;
 }
@@ -47,6 +45,11 @@ export interface Prompter {
     defaultValue?: string;
     validate?: (value: string) => string | undefined;
   }): Promise<string>;
+  /** Masked input for secrets. Throws WizardCancelledError on Ctrl-C / Escape. */
+  passwordInput(args: {
+    message: string;
+    validate?: (value: string) => string | undefined;
+  }): Promise<string>;
   /** Non-interactive display of a block of text between prompts. */
   note(message: string, title?: string): void;
   /** One-line status/warning between prompts (stderr). */
@@ -66,12 +69,9 @@ export interface WizardDeps {
   settingsPath?: string;
   /** Real: clack-backed ui/prompter.ts; tests: scripted answers. */
   prompter: Prompter;
-  /** Resolves false when the browser could not be opened — not fatal. */
-  openBrowser(url: string): Promise<boolean>;
   writeClipboard(text: string): Promise<boolean>;
   /** Injected for tests. */
   fetch: typeof fetch;
-  sleep(ms: number): Promise<void>;
   /** One-shot subprocess (git, probes). Never throws on non-zero exit. */
   exec(spec: CommandSpec): Promise<ExecResult>;
   /** Long-running subprocess with streamed stdout (agent runs). */
@@ -140,22 +140,6 @@ function spawnStreamingChild(spec: CommandSpec): StreamingChild {
 }
 
 /**
- * Open a URL in the default browser. Resolves false on failure — callers
- * always have a copy/paste fallback.
- */
-async function openBrowser(url: string): Promise<boolean> {
-  const platform = process.platform;
-  const spec: CommandSpec =
-    platform === "darwin"
-      ? { command: "open", args: [url] }
-      : platform === "win32"
-        ? { command: "cmd", args: ["/c", "start", "", url] }
-        : { command: "xdg-open", args: [url] };
-  const result = await execOnce(spec);
-  return result.exitCode === 0;
-}
-
-/**
  * Write text to the system clipboard. Resolves false on failure — callers
  * fall back to printing the text.
  */
@@ -190,10 +174,8 @@ export function buildDefaultDeps(options: WizardOptions): WizardDeps {
     options,
     stdinIsTTY: Boolean(process.stdin.isTTY),
     prompter: createClackPrompter(),
-    openBrowser,
     writeClipboard,
     fetch: globalThis.fetch.bind(globalThis),
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     exec: execOnce,
     spawnStreaming: spawnStreamingChild,
     now: () => Date.now(),

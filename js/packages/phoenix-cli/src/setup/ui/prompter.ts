@@ -13,6 +13,7 @@ import {
   log,
   note,
   outro,
+  password,
   select,
   text,
 } from "@clack/prompts";
@@ -71,6 +72,22 @@ export function createClackPrompter(): Prompter {
                   : (value ?? "");
               return args.validate?.(effective);
             }
+          : undefined,
+      });
+      if (isCancel(answer)) {
+        throw new WizardCancelledError();
+      }
+      return answer;
+    },
+
+    async passwordInput(args: {
+      message: string;
+      validate?: (value: string) => string | undefined;
+    }): Promise<string> {
+      const answer = await password({
+        message: args.message,
+        validate: args.validate
+          ? (value) => args.validate?.(value ?? "")
           : undefined,
       });
       if (isCancel(answer)) {

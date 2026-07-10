@@ -88,44 +88,29 @@ describe("runWizard", () => {
     ).toBe(true);
   });
 
-  it("auth-on happy path via the browser wizard session", async () => {
+  it("auth-on happy path with a pasted API key", async () => {
     const prompter = scriptedPrompter([
+      "sk-pasted", // API key
+      "my-app", // project name
       "ownAgent", // instrumentation mode
       true, // I've run the prompt
       true, // I can see traces
       false, // no px profile
       true, // production noted
     ]);
-    let openedUrl = "";
     const deps = buildFakeDeps({
       cwd: dir,
       prompter,
       options: { endpoint: LOCAL },
       exec: gitExecFake(),
-      openBrowser: async (url) => {
-        openedUrl = url;
-        return true;
-      },
       fetch: fakeFetch((url, init) => {
         if (url.includes("/v1/projects?limit=1")) {
           return jsonResponse(401, { detail: "unauthorized" });
         }
-        if (url.endsWith("/auth/setup-sessions") && init?.method === "POST") {
-          return jsonResponse(201, {
-            session_token: "sess",
-            poll_token: "poll",
-            expires_at: "2026-07-08T00:15:00Z",
-            login_path: "/cli-setup?session=sess",
-            verification_code: "KRFT-2946",
-          });
-        }
-        if (url.includes("/auth/setup-sessions/poll")) {
-          return jsonResponse(200, {
-            status: "complete",
-            api_key: "sk-minted",
-            project_id: PROJECT.id,
-            project_name: PROJECT.name,
-          });
+        if (url.includes("/v1/projects/") && init?.method === "GET") {
+          const headers = init.headers as Record<string, string>;
+          expect(headers.authorization).toBe("Bearer sk-pasted");
+          return jsonResponse(200, { data: PROJECT });
         }
         return undefined;
       }),
@@ -134,21 +119,17 @@ describe("runWizard", () => {
 
     const result = await runWizard(deps);
     expect(result.authEnabled).toBe(true);
-    expect(result.connection.apiKey).toBe("sk-minted");
-    expect(openedUrl).toBe(`${LOCAL}/cli-setup?session=sess`);
-    // Verification code shown in the terminal before the browser opens.
-    expect(
-      prompter.output.some((message) => message.includes("KRFT-2946"))
-    ).toBe(true);
+    expect(result.connection.apiKey).toBe("sk-pasted");
 
     const env = fs.readFileSync(path.join(dir, ".env.phoenix"), "utf-8");
-    expect(env).toContain("PHOENIX_API_KEY=sk-minted");
+    expect(env).toContain("PHOENIX_API_KEY=sk-pasted");
   });
 
-  it("falls back to pasting an API key when wizard sessions are unsupported", async () => {
+  it("re-prompts only for a rejected API key", async () => {
     const prompter = scriptedPrompter([
-      "sk-pasted", // API key
+      "sk-rejected", // API key
       "my-app", // project name
+      "sk-pasted", // replacement API key
       "manual",
       true,
       true,
@@ -164,10 +145,11 @@ describe("runWizard", () => {
         if (url.includes("/v1/projects?limit=1")) {
           return jsonResponse(401, { detail: "unauthorized" });
         }
-        if (url.endsWith("/auth/setup-sessions") && init?.method === "POST") {
-          return jsonResponse(404, { detail: "Not Found" });
-        }
         if (url.includes("/v1/projects/") && init?.method === "GET") {
+          const headers = init.headers as Record<string, string>;
+          if (headers.authorization === "Bearer sk-rejected") {
+            return jsonResponse(401, { detail: "unauthorized" });
+          }
           return jsonResponse(200, { data: PROJECT });
         }
         return undefined;
@@ -177,6 +159,14 @@ describe("runWizard", () => {
 
     const result = await runWizard(deps);
     expect(result.connection.apiKey).toBe("sk-pasted");
+    expect(
+      prompter.transcript.filter((message) => message === "Phoenix API key")
+    ).toHaveLength(2);
+    expect(
+      prompter.transcript.filter(
+        (message) => message === "Phoenix project name for this app's traces"
+      )
+    ).toHaveLength(1);
   });
 
   it("cancelling any prompt unwinds with WizardCancelledError", async () => {

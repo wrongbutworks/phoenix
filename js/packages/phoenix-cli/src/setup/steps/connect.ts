@@ -1,28 +1,23 @@
 /**
  * Step 3: establish the connection (spec §3.3, §4).
  *
- * Lane dispatch: auth-off (resolve-first project create), auth-on
- * interactive (browser wizard session, with paste-an-API-key fallback for
- * deployments without setup-session support), and headless (env-provided
- * key). All lanes converge on `Connection`.
+ * Lane dispatch: auth-off (resolve-first project create), auth-on interactive
+ * (pasted API key), and headless (env-provided key). All lanes converge on
+ * `Connection`. Future OAuth credential acquisition plugs into the auth-on
+ * interactive lane without changing project resolution or downstream steps.
  */
 
 import * as path from "node:path";
 
 import * as COPY from "../copy";
 import type { WizardDeps } from "../deps";
-import {
-  HeadlessInputError,
-  WizardCancelledError,
-  WizardFatalError,
-} from "../errors";
+import { HeadlessInputError, WizardFatalError } from "../errors";
 import {
   RestNetworkError,
   parseProjectResponse,
   restRequest,
   type ProjectResource,
 } from "../net/restClient";
-import { createSetupSession, pollSetupSession } from "../net/setupSession";
 import type { ResolvedWizardInputs } from "../options";
 import { redactForDisplay } from "../util/redact";
 
@@ -229,35 +224,42 @@ async function connectAuthOff(
 // ---------------------------------------------------------------------------
 
 /**
- * Paste-an-API-key fallback: used when the deployment has no
- * setup-session endpoints, or when the user picks it after a browser-flow
- * failure. The key is validated by resolving (or creating) the project
- * through the authenticated REST surface.
+ * Prompt for an API key without echoing it to the terminal.
  */
-async function connectWithPastedKey(
+async function promptForApiKey(deps: WizardDeps): Promise<string> {
+  const apiKey = await deps.prompter.passwordInput({
+    message: COPY.API_KEY.pasteKeyMessage,
+    validate: (value) =>
+      value.trim() ? undefined : COPY.API_KEY.pasteKeyInvalid,
+  });
+  return apiKey.trim();
+}
+
+/**
+ * Resolve the selected project using a user-supplied API key. A rejected key
+ * returns to the masked credential prompt without asking for the project again.
+ */
+async function connectAuthOnInteractive(
   deps: WizardDeps,
   endpoint: string,
   inputs: ResolvedWizardInputs
 ): Promise<Connection> {
-  for (;;) {
-    const apiKey = await deps.prompter.textInput({
-      message: COPY.WIZARD_SESSION.pasteKeyMessage,
-      validate: (value) =>
-        value.trim() ? undefined : COPY.WIZARD_SESSION.pasteKeyInvalid,
-    });
-    const projectName =
-      inputs.project ??
-      (await deps.prompter.textInput({
-        message: COPY.CONNECT.projectNameMessage,
-        defaultValue: defaultProjectName(deps.cwd),
-        validate: validateProjectName,
-      }));
+  deps.prompter.note(COPY.API_KEY.instructions, COPY.API_KEY.instructionsTitle);
+  let apiKey = await promptForApiKey(deps);
+  const projectName =
+    inputs.project ??
+    (await deps.prompter.textInput({
+      message: COPY.CONNECT.projectNameMessage,
+      defaultValue: defaultProjectName(deps.cwd),
+      validate: validateProjectName,
+    }));
 
+  for (;;) {
     const result = await resolveOrCreateProject(
       deps,
       endpoint,
       projectName.trim(),
-      apiKey.trim()
+      apiKey
     );
     if (result.kind === "ok") {
       deps.prompter.line(
@@ -269,11 +271,12 @@ async function connectWithPastedKey(
         endpoint,
         projectName: result.project.name,
         projectId: result.project.id,
-        apiKey: apiKey.trim(),
+        apiKey,
       };
     }
     if (result.kind === "unauthorized" && result.status === 401) {
-      deps.prompter.line(COPY.WIZARD_SESSION.pasteKeyRejected);
+      deps.prompter.line(COPY.API_KEY.pasteKeyRejected);
+      apiKey = await promptForApiKey(deps);
       continue;
     }
     throw new WizardFatalError(
@@ -282,94 +285,6 @@ async function connectWithPastedKey(
       )
     );
   }
-}
-
-async function connectAuthOnInteractive(
-  deps: WizardDeps,
-  endpoint: string,
-  inputs: ResolvedWizardInputs
-): Promise<Connection> {
-  for (;;) {
-    deps.prompter.line(COPY.WIZARD_SESSION.starting);
-    const created = await createSetupSession(deps, endpoint);
-
-    if (created.kind === "unsupported") {
-      deps.prompter.line(COPY.WIZARD_SESSION.notSupported);
-      return connectWithPastedKey(deps, endpoint, inputs);
-    }
-    if (created.kind === "error") {
-      deps.prompter.line(
-        COPY.CONNECT.createFailed(redactForDisplay(created.detail))
-      );
-      const next = await promptSessionRetry(deps);
-      if (next === "retry") {
-        continue;
-      }
-      if (next === "paste") {
-        return connectWithPastedKey(deps, endpoint, inputs);
-      }
-      throw new WizardCancelledError();
-    }
-
-    const { session } = created;
-    // The claim page lives on the app origin — same as the API origin in
-    // every real deployment; --app-url overrides it for development.
-    const appOrigin = deps.options.appUrl ?? endpoint;
-    const loginUrl = `${appOrigin}${session.loginPath}`;
-
-    deps.prompter.note(
-      `${COPY.WIZARD_SESSION.codeIntro} ${session.verificationCode}\n\n${COPY.WIZARD_SESSION.codeExplainer(session.verificationCode)}`
-    );
-    const opened = await deps.openBrowser(loginUrl);
-    deps.prompter.line(
-      opened
-        ? COPY.WIZARD_SESSION.browserOpened(loginUrl)
-        : COPY.WIZARD_SESSION.browserFailed(loginUrl)
-    );
-    deps.prompter.line(COPY.WIZARD_SESSION.waiting);
-
-    const polled = await pollSetupSession(deps, endpoint, session);
-    if (polled.kind === "complete") {
-      deps.prompter.line(COPY.WIZARD_SESSION.complete);
-      return {
-        endpoint,
-        projectName: polled.projectName,
-        projectId: polled.projectId,
-        apiKey: polled.apiKey,
-      };
-    }
-
-    deps.prompter.line(
-      polled.kind === "timedOut"
-        ? COPY.WIZARD_SESSION.timedOut
-        : polled.kind === "expired"
-          ? COPY.WIZARD_SESSION.expired
-          : polled.kind === "claimed"
-            ? COPY.WIZARD_SESSION.claimed
-            : COPY.CONNECT.createFailed(redactForDisplay(polled.detail))
-    );
-    const next = await promptSessionRetry(deps);
-    if (next === "retry") {
-      continue;
-    }
-    if (next === "paste") {
-      return connectWithPastedKey(deps, endpoint, inputs);
-    }
-    throw new WizardCancelledError();
-  }
-}
-
-function promptSessionRetry(
-  deps: WizardDeps
-): Promise<"retry" | "paste" | "exit"> {
-  return deps.prompter.select<"retry" | "paste" | "exit">({
-    message: COPY.WIZARD_SESSION.retryMessage,
-    options: [
-      { value: "retry", label: COPY.WIZARD_SESSION.retryYes },
-      { value: "paste", label: COPY.WIZARD_SESSION.retryPaste },
-      { value: "exit", label: COPY.WIZARD_SESSION.retryNo },
-    ],
-  });
 }
 
 // ---------------------------------------------------------------------------

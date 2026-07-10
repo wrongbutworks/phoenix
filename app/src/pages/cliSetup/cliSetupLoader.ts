@@ -12,6 +12,8 @@ import type { LoaderFunctionArgs } from "react-router";
 import { authFetch } from "@phoenix/authFetch";
 import { BASE_URL } from "@phoenix/config";
 
+const PROJECTS_PAGE_SIZE = 100;
+
 export type CliSetupSessionStatus =
   | "pending"
   | "complete"
@@ -40,6 +42,36 @@ export type CliSetupLoaderData =
   | { kind: "missing-session" }
   | { kind: "unknown-session" };
 
+async function loadAllProjects(): Promise<CliSetupProject[]> {
+  const projects: CliSetupProject[] = [];
+  let cursor: string | null = null;
+
+  do {
+    const searchParams = new URLSearchParams({
+      limit: String(PROJECTS_PAGE_SIZE),
+    });
+    if (cursor) {
+      searchParams.set("cursor", cursor);
+    }
+
+    const response = await authFetch(
+      `${BASE_URL}/v1/projects?${searchParams.toString()}`
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to load projects (${response.status})`);
+    }
+
+    const body = (await response.json()) as {
+      data: CliSetupProject[];
+      next_cursor: string | null;
+    };
+    projects.push(...body.data);
+    cursor = body.next_cursor;
+  } while (cursor);
+
+  return projects;
+}
+
 export async function cliSetupLoader({
   request,
 }: LoaderFunctionArgs): Promise<CliSetupLoaderData> {
@@ -59,18 +91,10 @@ export async function cliSetupLoader({
   }
   const info = (await infoResponse.json()) as CliSetupSessionInfo;
 
-  let projects: CliSetupProject[] = [];
-  if (info.status === "pending" && !info.viewer_blocked) {
-    const projectsResponse = await authFetch(
-      `${BASE_URL}/v1/projects?limit=100`
-    );
-    if (projectsResponse.ok) {
-      const body = (await projectsResponse.json()) as {
-        data: CliSetupProject[];
-      };
-      projects = body.data;
-    }
-  }
+  const projects =
+    info.status === "pending" && !info.viewer_blocked
+      ? await loadAllProjects()
+      : [];
 
   return { kind: "ready", sessionToken, info, projects };
 }

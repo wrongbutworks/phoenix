@@ -285,7 +285,7 @@ class TestSweep:
                 )
             )
         sweeper = TraceDataSweeper.__new__(TraceDataSweeper)
-        sweeper._db = db  # type: ignore[attr-defined]
+        sweeper._db = db
         await sweeper._delete_expired_setup_sessions()
         async with db() as session:
             row = await session.scalar(select(models.SetupSession))

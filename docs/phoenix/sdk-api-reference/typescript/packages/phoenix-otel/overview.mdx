@@ -120,7 +120,6 @@ const provider = register({
 | `instrumentations` | OpenTelemetry instrumentations to register with the provider. |
 | `spanProcessors` | Custom span processors. When provided, these replace the default Phoenix exporter setup. |
 | `global` | Whether to attach the provider to the global OpenTelemetry APIs automatically. |
-| `aiSdkTelemetry` | Whether to auto-register a Vercel AI SDK (v7+) telemetry integration when the `ai` package is installed. Defaults to the value of `global`, since AI SDK spans route through the global tracer provider. |
 | `diagLogLevel` | OpenTelemetry diagnostic logging level. |
 
 ### Environment Variables
@@ -134,20 +133,26 @@ const provider = register({
 
 ### Vercel AI SDK (v7+)
 
-When the `ai` package (v7 or later) is installed, `register()` automatically registers an AI SDK telemetry integration, so calls like `generateText` and `streamText` emit spans without per-call configuration. The bundled `@arizeai/openinference-vercel` span processors translate AI SDK spans to OpenInference before export.
+AI SDK v7 telemetry registration is process-global, so configure it explicitly in your application. Install `ai` and `@ai-sdk/otel`; the bundled `@arizeai/openinference-vercel` span processors then translate the emitted spans to OpenInference before export.
 
 ```ts
+import { OpenTelemetry } from "@ai-sdk/otel";
+import { registerTelemetry } from "ai";
 import { register } from "@arizeai/phoenix-otel";
 
-register({ projectName: "my-ai-app" });
+const provider = register({ projectName: "my-ai-app" });
 
-// Elsewhere in your app — traced automatically:
-// const result = await generateText({ model, prompt });
+registerTelemetry(
+  new OpenTelemetry({
+    tracer: provider.getTracer("@arizeai/phoenix-otel/ai-sdk"),
+    // Headers can contain authorization tokens and cookies.
+    headers: false,
+  })
+);
 ```
 
-- registration is skipped when your application already registered its own `OpenTelemetry` AI SDK integration
-- the default follows the `global` option: non-global `register()` calls don't touch AI SDK telemetry unless you pass `aiSdkTelemetry: true`
-- pass `aiSdkTelemetry: false` to opt out
+- call `registerTelemetry()` only once during application startup
+- compose this integration with any logging, metrics, or custom integrations your application already registers
 - AI SDK v6 and older emit a different span shape; use `@arizeai/phoenix-otel` 1.x for AI SDK v6
 
 ### OpenTelemetry Instrumentations

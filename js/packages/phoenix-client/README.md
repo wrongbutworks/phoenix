@@ -303,12 +303,6 @@ const experiment = await runExperiment({
 The package also exposes Vitest and Jest submodules for writing
 dataset-backed evaluations as normal test suites.
 
-> **Note:** The test tracking integration loads `@arizeai/phoenix-otel`,
-> which is ESM-only. Vitest handles this natively; Jest requires its
-> [ESM support](https://jestjs.io/docs/ecmascript-modules) to be enabled,
-> since Jest's default CommonJS module registry cannot `require()` ESM-only
-> packages.
-
 ```bash
 npm install -D @arizeai/phoenix-client vitest dotenv
 ```

@@ -1,6 +1,6 @@
 import { OpenTelemetry } from "@ai-sdk/otel";
 import type { Tracer } from "@opentelemetry/api";
-import { generateObject } from "ai";
+import { generateObject, type Telemetry } from "ai";
 import { z } from "zod";
 
 import { tracer } from "../telemetry";
@@ -28,6 +28,16 @@ export type ClassifyArgs = WithLLM &
  * static, so avoid allocating a new integration on every classification call.
  */
 const telemetryIntegrations = new WeakMap<Tracer, OpenTelemetry>();
+
+type GlobalWithAiSdkTelemetry = typeof globalThis & {
+  AI_SDK_TELEMETRY_INTEGRATIONS?: Telemetry[];
+};
+
+function getGlobalTelemetryIntegrations(): Telemetry[] {
+  return (
+    (globalThis as GlobalWithAiSdkTelemetry).AI_SDK_TELEMETRY_INTEGRATIONS ?? []
+  );
+}
 
 function getTelemetryIntegration(integrationTracer: Tracer): OpenTelemetry {
   let integration = telemetryIntegrations.get(integrationTracer);
@@ -57,10 +67,13 @@ export async function generateClassification(
   const telemetryOptions = {
     isEnabled: telemetry?.isEnabled ?? true,
     functionId: "generateClassification",
-    // A per-call telemetry integration takes precedence over any globally
-    // registered integrations, so evaluator spans always flow through the
-    // provided (or lazy global) tracer.
-    integrations: [getTelemetryIntegration(telemetry?.tracer ?? tracer)],
+    // Per-call integrations replace the AI SDK's global integrations. Carry
+    // them forward so application logging, metrics, and custom telemetry keep
+    // running alongside Phoenix tracing.
+    integrations: [
+      ...getGlobalTelemetryIntegrations(),
+      getTelemetryIntegration(telemetry?.tracer ?? tracer),
+    ],
   };
 
   const result = await generateObject({

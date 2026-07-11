@@ -40,10 +40,7 @@ A lightweight wrapper around OpenTelemetry for Node.js applications that simplif
 npm install @arizeai/phoenix-otel
 ```
 
-Requires Node.js 22.12 or newer. The package is published as ESM; on Node.js
-22.12+ it can also be loaded from CommonJS via `require()`. Note that test
-runners with their own CommonJS module registries (e.g. jest without ESM mode)
-cannot `require()` ESM-only packages.
+Requires Node.js 18 or newer. Both ESM and CommonJS entry points are provided.
 
 ## Quick Start
 
@@ -111,27 +108,33 @@ The `register` function accepts the following parameters:
 | `batch`            | `boolean`                | `true`                    | Use batch span processing (recommended for production) |
 | `instrumentations` | `Instrumentation[]`      | `undefined`               | Array of OpenTelemetry instrumentations to register    |
 | `global`           | `boolean`                | `true`                    | Register the tracer provider globally                  |
-| `aiSdkTelemetry`   | `boolean`                | value of `global`         | Register Vercel AI SDK (v7+) telemetry when available  |
 | `diagLogLevel`     | `DiagLogLevel`           | `undefined`               | Diagnostic logging level for debugging                 |
 
 ## Usage Examples
 
 ### With the Vercel AI SDK (v7+)
 
-When the `ai` package (v7 or later) is installed, `register()` automatically
-registers an AI SDK telemetry integration (via `registerTelemetry` from `ai`
-and `OpenTelemetry` from `@ai-sdk/otel`), so AI SDK calls emit spans without
-any per-call configuration. Spans are translated to OpenInference by the
-`@arizeai/openinference-vercel` span processors that `register()` sets up by
-default.
+AI SDK v7 telemetry registration is process-global, so applications configure
+it explicitly. Install `ai` and `@ai-sdk/otel`, then register the integration
+alongside the Phoenix provider. Request-header capture is disabled below
+because headers can contain authorization tokens and cookies.
 
 ```typescript
 // instrumentation.ts
+import { OpenTelemetry } from "@ai-sdk/otel";
+import { registerTelemetry } from "ai";
 import { register } from "@arizeai/phoenix-otel";
 
-register({
+const provider = register({
   projectName: "my-ai-app",
 });
+
+registerTelemetry(
+  new OpenTelemetry({
+    tracer: provider.getTracer("@arizeai/phoenix-otel/ai-sdk"),
+    headers: false,
+  })
+);
 ```
 
 ```typescript
@@ -145,14 +148,6 @@ const result = await generateText({
   prompt: "Write a short story about a cat.",
 });
 ```
-
-If your application already registers its own `OpenTelemetry` AI SDK
-integration, Phoenix skips the automatic registration. Because AI SDK spans
-route through the global tracer provider, the automatic registration only
-happens by default when `register()` mounts the provider globally
-(`global: true`, the default); pass `aiSdkTelemetry: true` alongside
-`global: false` if you attach the provider globally yourself, or
-`aiSdkTelemetry: false` to opt out entirely.
 
 > **Note**: AI SDK v6 and older emit a different span shape that is not
 > supported by the bundled span processors. Use `@arizeai/phoenix-otel` 1.x

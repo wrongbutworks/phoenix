@@ -27,7 +27,6 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 
-import { registerAiSdkTelemetry } from "./aiSdkTelemetry";
 import { getEnvApiKey, getEnvCollectorURL } from "./config";
 
 /**
@@ -155,30 +154,6 @@ export type RegisterParams = {
    * @default true
    */
   global?: boolean;
-
-  /**
-   * Whether to register a telemetry integration for the Vercel AI SDK (v7+).
-   *
-   * Since AI SDK v7, calls like `generateText` and `streamText` only emit
-   * OpenTelemetry spans once a telemetry integration is registered via
-   * `registerTelemetry()`. When this option is enabled and the `ai` package
-   * is installed, an `OpenTelemetry` integration (from `@ai-sdk/otel`) is
-   * registered automatically so AI SDK spans flow through the global tracer
-   * provider. Registration is skipped if the application has already
-   * registered an OpenTelemetry integration.
-   *
-   * The AI SDK integration is process-global: its spans follow the global
-   * tracer provider, not the provider returned by this call. It therefore
-   * defaults to the value of `global` — a non-global `register()` call does
-   * not touch AI SDK telemetry unless explicitly asked to. Pass `true` with
-   * `global: false` when you attach the provider globally yourself (e.g. via
-   * `attachGlobalTracerProvider()`).
-   *
-   * Set to `false` to configure AI SDK telemetry manually.
-   *
-   * @default the value of `global`
-   */
-  aiSdkTelemetry?: boolean;
 
   /**
    * The diagnostic log level for the built-in DiagConsoleLogger.
@@ -490,19 +465,12 @@ export function register(params: RegisterParams): NodeTracerProvider {
     global = true,
     diagLogLevel,
     spanProcessors,
-    // The AI SDK integration routes spans through the *global* tracer
-    // provider, so only register it by default when this call mounts the
-    // provider globally.
-    aiSdkTelemetry = global,
   } = params;
 
   if (diagLogLevel) {
     diag.setLogger(new DiagConsoleLogger(), diagLogLevel);
   }
 
-  if (aiSdkTelemetry) {
-    registerAiSdkTelemetry();
-  }
   const provider = new NodeTracerProvider({
     resource: resourceFromAttributes({
       [SEMRESATTRS_PROJECT_NAME]: projectName,

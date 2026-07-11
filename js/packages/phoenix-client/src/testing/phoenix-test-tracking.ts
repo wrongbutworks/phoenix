@@ -16,6 +16,7 @@ import {
 import type { Span } from "@opentelemetry/api";
 
 import { createDataset } from "../datasets";
+import { registerAiSdkTelemetry } from "../experiments/aiSdkTelemetry";
 import { cleanupOwnedTracerProvider } from "../experiments/tracing";
 import { createClient, type PhoenixClient } from "../index";
 import { ensureString } from "../utils/ensureString";
@@ -360,6 +361,7 @@ export async function initializeSuite(suite: SuiteState): Promise<void> {
 
   let provider: NodeTracerProvider;
   try {
+    await registerAiSdkTelemetry();
     provider = register({
       projectName: suite.projectName,
       url: baseUrl,
@@ -368,9 +370,6 @@ export async function initializeSuite(suite: SuiteState): Promise<void> {
         : undefined,
       batch: false,
       global: false,
-      // The provider is attached globally right below, so AI SDK spans
-      // (routed through the global provider) should be enabled.
-      aiSdkTelemetry: true,
     });
     suite.tracerProvider = provider;
     suite.globalRegistration = attachGlobalTracerProvider(provider);

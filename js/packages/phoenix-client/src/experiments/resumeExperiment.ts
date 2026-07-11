@@ -27,6 +27,7 @@ import { ensureString } from "../utils/ensureString";
 import { isHttpErrorWithStatus } from "../utils/isHttpError";
 import { toObjectHeaders } from "../utils/toObjectHeaders";
 import { getDatasetExperimentsUrl, getExperimentUrl } from "../utils/urlUtils";
+import { registerAiSdkTelemetry } from "./aiSdkTelemetry";
 import { getExperimentInfo } from "./getExperimentInfo.js";
 import { getExampleGlobalId } from "./helpers/getExampleGlobalId";
 import {
@@ -180,7 +181,7 @@ async function handleFetchError(
 /**
  * Sets up OpenTelemetry tracer for experiment tracing
  */
-function setupTracer({
+async function setupTracer({
   projectName,
   baseUrl,
   headers,
@@ -194,15 +195,18 @@ function setupTracer({
   useBatchSpanProcessor: boolean;
   diagLogLevel?: DiagLogLevel;
   setGlobalTracerProvider: boolean;
-}): {
+}): Promise<{
   provider: NodeTracerProvider;
   tracer: Tracer;
   globalRegistration: GlobalTracerProviderRegistration | null;
-} | null {
+} | null> {
   if (!projectName) {
     return null;
   }
 
+  if (setGlobalTracerProvider) {
+    await registerAiSdkTelemetry();
+  }
   const provider = register({
     projectName,
     url: baseUrl,
@@ -210,9 +214,6 @@ function setupTracer({
     batch: useBatchSpanProcessor,
     diagLogLevel,
     global: false,
-    // AI SDK spans route through the global provider, so only enable the
-    // integration when this provider is about to be attached globally.
-    aiSdkTelemetry: setGlobalTracerProvider,
   });
   const globalRegistration = setGlobalTracerProvider
     ? attachGlobalTracerProvider(provider)
@@ -316,7 +317,7 @@ export async function resumeExperiment({
   );
 
   // Initialize tracer (only if experiment has a project_name)
-  const tracerSetup = setupTracer({
+  const tracerSetup = await setupTracer({
     projectName: experiment.projectName,
     baseUrl,
     headers: client.config.headers

@@ -45,6 +45,7 @@ import {
   getDatasetUrl,
   getExperimentUrl,
 } from "../utils/urlUtils";
+import { registerAiSdkTelemetry } from "./aiSdkTelemetry";
 import { getExperimentInfo } from "./getExperimentInfo";
 import { getExperimentEvaluators } from "./helpers";
 import { getExampleGlobalId } from "./helpers/getExampleGlobalId";
@@ -275,6 +276,9 @@ export async function runExperiment({
       "Phoenix base URL not found. Please set PHOENIX_HOST or set baseUrl on the client."
     );
 
+    if (setGlobalTracerProvider) {
+      await registerAiSdkTelemetry();
+    }
     taskProvider = register({
       projectName,
       url: baseUrl,
@@ -284,9 +288,6 @@ export async function runExperiment({
       batch: useBatchSpanProcessor,
       diagLogLevel,
       global: false,
-      // AI SDK spans route through the global provider, so only enable the
-      // integration when this provider is about to be attached globally.
-      aiSdkTelemetry: setGlobalTracerProvider,
     });
     taskGlobalRegistration = setGlobalTracerProvider
       ? attachGlobalTracerProvider(taskProvider)
@@ -636,6 +637,9 @@ export async function evaluateExperiment({
   if (paramsTracerProvider) {
     provider = paramsTracerProvider;
   } else if (!isDryRun) {
+    if (setGlobalTracerProvider) {
+      await registerAiSdkTelemetry();
+    }
     provider = register({
       projectName: "evaluators",
       url: baseUrl,
@@ -645,9 +649,6 @@ export async function evaluateExperiment({
       batch: useBatchSpanProcessor,
       diagLogLevel,
       global: false,
-      // AI SDK spans route through the global provider, so only enable the
-      // integration when this provider is about to be attached globally.
-      aiSdkTelemetry: setGlobalTracerProvider,
     });
     globalRegistration = setGlobalTracerProvider
       ? attachGlobalTracerProvider(provider)

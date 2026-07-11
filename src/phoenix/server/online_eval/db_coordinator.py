@@ -77,8 +77,7 @@ class DbEvalWorkCoordinator:
                 "status": "RUNNING",
                 "claimed_at": now,
                 "claimed_by": claimed_by,
-                # A straggler outliving the stop() drain is counted; repeated interruption
-                # across the attempt ceiling is treated as a persistent failure.
+                # A straggler outliving the stop() drain is counted.
                 "attempts": case(
                     (
                         models.EvalWorkUnit.status == "RUNNING",
